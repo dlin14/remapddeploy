@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 
 from services.optimizer_store import should_cancel, reset_cancel
+from services.census_cache import get_county_data
 
 
 @dataclass
@@ -282,17 +283,24 @@ class RLAgent:
         }
 
     def _build_county_features(self, county_ids: list[str]) -> dict[str, dict[str, float]]:
+        # Try real Census ACS data first (requires CENSUS_API_KEY in env).
+        real = get_county_data(self.state_fips)
+
         features: dict[str, dict[str, float]] = {}
         for county_id in county_ids:
-            # Deterministic pseudo-data keeps local demos stable without API calls.
-            seed = int(county_id)
-            rng = np.random.default_rng(seed)
-            population = int(rng.integers(12_000, 300_000))
-            minority_share = float(rng.uniform(0.12, 0.78))
-            features[county_id] = {
-                "population": float(population),
-                "minority_share": minority_share,
-            }
+            if county_id in real:
+                features[county_id] = {
+                    "population": float(real[county_id]["population"]),
+                    "minority_share": float(real[county_id]["minority_share"]),
+                }
+            else:
+                # Deterministic synthetic fallback when no Census API key is set.
+                seed = int(county_id)
+                rng = np.random.default_rng(seed)
+                features[county_id] = {
+                    "population": float(rng.integers(12_000, 300_000)),
+                    "minority_share": float(rng.uniform(0.12, 0.78)),
+                }
         return features
 
     def _load_counties_and_centroids(
