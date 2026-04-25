@@ -20,13 +20,11 @@ app.add_middleware(
 )
 
 
+from api.routes.states import router as states_router
+
+app.include_router(states_router)
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "version": "0.1.0"}
-
-
-# TODO: mount routers
-# from api.routes import metrics, states, agent
-# app.include_router(metrics.router, prefix="/api/metrics")
-# app.include_router(states.router, prefix="/api/states")
-# app.include_router(agent.router, prefix="/api/agent")
