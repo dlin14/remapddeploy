@@ -2,9 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowLeft } from "lucide-react";
-import StateMap from "@/components/map/StateMap";
-import DemographicsPanel from "@/components/dashboard/DemographicsPanel";
-import RLParamsSliders from "@/components/dashboard/RLParamsSliders";
+import StatePageClient from "./StatePageClient";
 
 const STATE_INFO: Record<string, { name: string; fips: string }> = {
   AL: { name: "Alabama", fips: "01" },
@@ -75,7 +73,16 @@ export default async function StatePage({ params }: StatePageProps) {
       {/* Top bar */}
       <header className="flex items-center gap-4 px-6 py-3 border-b border-white/10 bg-slate-950/90 backdrop-blur sticky top-0 z-20">
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
-          <Image src="/logo.png" alt="remapd" width={28} height={28} className="rounded-md" />
+          <div className="w-7 h-7 rounded-lg overflow-hidden shrink-0">
+            <Image
+              src="/logo.png"
+              alt="remapd"
+              width={100}
+              height={40}
+              className="h-full w-auto max-w-none"
+              style={{ objectFit: "cover", objectPosition: "left center" }}
+            />
+          </div>
           <span className="font-bold text-sm text-white/80">remapd</span>
         </Link>
         <span className="text-white/15">/</span>
@@ -93,30 +100,7 @@ export default async function StatePage({ params }: StatePageProps) {
         </span>
       </header>
 
-      {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Map */}
-        <main className="flex-1 p-6 overflow-auto">
-          <StateMap stateFips={info.fips} stateName={info.name} />
-        </main>
-
-        {/* Sidebar */}
-        <aside className="w-80 border-l border-white/10 flex flex-col overflow-y-auto bg-slate-900/40">
-          <div className="p-4 border-b border-white/10">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">
-              Demographics
-            </h2>
-            <DemographicsPanel stateAbbr={abbr} />
-          </div>
-
-          <div className="p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">
-              RL Parameters
-            </h2>
-            <RLParamsSliders stateAbbr={abbr} />
-          </div>
-        </aside>
-      </div>
+      <StatePageClient abbr={abbr} fips={info.fips} name={info.name} />
     </div>
   );
 }

@@ -69,6 +69,8 @@ function SliderRow({ label, value, min, max, step, format, onChange }: SliderRow
 
 interface RLParamsSlidersProps {
   stateAbbr: string;
+  externalParams?: Partial<Record<string, number>>;
+  externalParamsKey?: number;
 }
 
 interface RunResponse {
@@ -84,7 +86,7 @@ interface RunResponse {
   score_breakdown?: Record<string, number>;
 }
 
-export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
+export default function RLParamsSliders({ stateAbbr, externalParams, externalParamsKey }: RLParamsSlidersProps) {
   const defaultDistricts = ABBR_TO_DISTRICTS[stateAbbr] ?? 5;
   const DEFAULTS: RLParams = { ...BASE_DEFAULTS, n_districts: defaultDistricts };
   const [params, setParams] = useState<RLParams>(DEFAULTS);
@@ -92,6 +94,14 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
   const [status, setStatus] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<RunResponse | null>(null);
   const runningRef = useRef(false);
+
+  // Apply params pushed from the parent (agent suggestion)
+  useEffect(() => {
+    if (externalParams && externalParamsKey !== undefined) {
+      setParams((p) => ({ ...p, ...externalParams }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalParamsKey]);
 
   // Stop the optimizer when the user navigates away from the state page
   useEffect(() => {
@@ -108,6 +118,7 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
   const set = useCallback(<K extends keyof RLParams>(key: K, val: RLParams[K]) => {
     setParams((p) => ({ ...p, [key]: val }));
   }, []);
+
 
   const rewardWeightTotal = (
     params.racial_weight + params.population_weight +

@@ -8,14 +8,17 @@ export default function HomePage() {
       {/* Top nav bar */}
       <header className="flex items-center px-8 py-3 border-b border-white/10">
         <div className="flex items-center gap-3">
-          <Image
-            src="/logo.png"
-            alt="remapd logo"
-            width={36}
-            height={36}
-            className="rounded-lg"
-            priority
-          />
+          <div className="w-9 h-9 rounded-xl overflow-hidden shrink-0">
+            <Image
+              src="/logo.png"
+              alt="remapd logo"
+              width={120}
+              height={48}
+              className="h-full w-auto max-w-none"
+              style={{ objectFit: "cover", objectPosition: "left center" }}
+              priority
+            />
+          </div>
           <span className="font-bold text-base tracking-tight text-white/90">remapd</span>
         </div>
       </header>
@@ -26,10 +29,7 @@ export default function HomePage() {
           remapd
         </h1>
         <p className="text-slate-400 text-base max-w-xl leading-relaxed">
-          Congressional district boundaries determine whose voice gets heard — remapd uses{" "}
-          <span className="text-indigo-400 font-medium">reinforcement learning agents</span> to
-          autonomously redraw them, optimizing for racial fairness, population equality,
-          compactness, and voting rights protections.
+          Improving equity by fairly redefining congressional district boundaries
         </p>
       </section>
 

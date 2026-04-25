@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
 from api.routes.states import ABBR_TO_FIPS
 from agents.social_impact_agent import SocialImpactAgent
-from core.config import Settings
+from core.config import Settings, settings
 from models.agent.rl_agent import OptimizerParams, RLAgent
 from services.optimizer_store import (
     get_all_plans,
@@ -95,6 +96,145 @@ async def stop_agent():
     """Signal the running optimizer to stop and save best-so-far."""
     request_cancel()
     return {"status": "stop_requested"}
+
+
+class SuggestParamsPayload(BaseModel):
+    state_abbr: str = Field(min_length=2, max_length=2)
+    prompt: str = Field(min_length=1, max_length=600)
+    current_params: dict[str, float] = Field(default_factory=dict)
+
+
+@router.post("/suggest-params")
+async def suggest_params(payload: SuggestParamsPayload):
+    """Use Claude to translate a natural-language request into RL weight suggestions."""
+    state_abbr = payload.state_abbr.upper()
+
+    system = (
+        "You are an expert redistricting optimization assistant helping policymakers "
+        "understand how algorithmic parameters shape district maps. "
+        "Translate the user's plain-English request into RL optimizer parameters. "
+        "Return ONLY strict JSON — no markdown, no extra keys — with exactly these keys:\n"
+        '{"racial_weight": <0-1>, "population_weight": <0-1>, '
+        '"compactness_weight": <0-1>, "vra_weight": <0-1>, '
+        '"n_steps": <200-2000>, "rationale": "<one concise sentence>", '
+        '"explanation": "<2-3 sentences in plain English: what will the optimizer do differently, '
+        'what might the resulting map look like, and what real-world fairness impact does this have>"}\n'
+        "The four weights must sum to 1.0. Adjust them to reflect the user's stated priorities. "
+        "Write the explanation for a general audience — no jargon, no math notation."
+    )
+    user_content = (
+        f"State: {state_abbr}\n"
+        f"Current parameters: {json.dumps(payload.current_params)}\n"
+        f"User request: {payload.prompt}\n\n"
+        "Return suggested RL optimizer parameters as JSON."
+    )
+
+    if settings.ANTHROPIC_API_KEY:
+        try:
+            body = {
+                "model": settings.LIAISON_MODEL,
+                "max_tokens": 350,
+                "temperature": 0.2,
+                "system": system,
+                "messages": [{"role": "user", "content": user_content}],
+            }
+            headers = {
+                "x-api-key": settings.ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages", json=body, headers=headers
+                )
+            if resp.status_code == 200:
+                text = "".join(
+                    c.get("text", "")
+                    for c in resp.json().get("content", [])
+                    if c.get("type") == "text"
+                ).strip()
+                # Strip optional markdown code fences
+                if "```" in text:
+                    text = text.split("```")[1]
+                    if text.startswith("json"):
+                        text = text[4:]
+                parsed = json.loads(text.strip())
+
+                def clamp(v: Any, lo: float, hi: float) -> float:
+                    return max(lo, min(hi, float(v)))
+
+                return {
+                    "suggested_params": {
+                        "racial_weight": clamp(parsed.get("racial_weight", 0.35), 0, 1),
+                        "population_weight": clamp(parsed.get("population_weight", 0.30), 0, 1),
+                        "compactness_weight": clamp(parsed.get("compactness_weight", 0.20), 0, 1),
+                        "vra_weight": clamp(parsed.get("vra_weight", 0.15), 0, 1),
+                        "n_steps": max(200, min(2000, int(parsed.get("n_steps", 700)))),
+                    },
+                    "rationale": str(parsed.get("rationale", "Parameters adjusted to reflect your priorities.")),
+                    "explanation": str(parsed.get("explanation", "")),
+                    "model": settings.LIAISON_MODEL,
+                    "powered_by": "claude",
+                }
+        except Exception:
+            pass  # fall through to rule-based
+
+    # Rule-based fallback (no API key or parse error)
+    p = payload.prompt.lower()
+    if any(w in p for w in ["racial", "race", "minority", "diversity", "representation"]):
+        r, pop, c, v = 0.50, 0.25, 0.15, 0.10
+        note = "Boosted racial fairness weight to prioritize minority representation."
+        explanation = (
+            "The optimizer will work much harder to keep each district's racial composition "
+            "proportional to the state's overall demographics. Expect districts that closely mirror "
+            "the minority share of the population — this may produce slightly less geographically "
+            "tidy shapes, but communities of color are more likely to have meaningful representation."
+        )
+    elif any(w in p for w in ["compact", "geographic", "shape", "contiguous"]):
+        r, pop, c, v = 0.25, 0.25, 0.40, 0.10
+        note = "Boosted compactness weight for more geographically coherent districts."
+        explanation = (
+            "The optimizer will strongly prefer districts that are geographically tight and "
+            "contiguous — think fewer oddly-shaped, sprawling boundaries. The resulting map will "
+            "look cleaner and be easier to explain to constituents, though racial and population "
+            "balance may take a back seat."
+        )
+    elif any(w in p for w in ["vra", "voting", "rights", "opportunity", "section 2"]):
+        r, pop, c, v = 0.20, 0.20, 0.10, 0.50
+        note = "Boosted VRA weight to maximize minority opportunity districts."
+        explanation = (
+            "The optimizer will try to create as many 'opportunity districts' as possible — "
+            "districts where minority voters have a realistic chance of electing their preferred "
+            "candidate. This directly addresses Section 2 of the Voting Rights Act. Shape and "
+            "pure population balance matter less here; what counts is giving underrepresented "
+            "communities real political power."
+        )
+    elif any(w in p for w in ["population", "equal", "balance", "fair"]):
+        r, pop, c, v = 0.25, 0.50, 0.15, 0.10
+        note = "Boosted population equality for more balanced district sizes."
+        explanation = (
+            "Each district will be pushed toward having the same number of people, minimizing "
+            "the advantage that comes from packing voters into unusually large or small districts. "
+            "This is the 'one person, one vote' principle — every citizen's vote carries roughly "
+            "equal weight regardless of which district they live in."
+        )
+    else:
+        r, pop, c, v = 0.35, 0.30, 0.20, 0.15
+        note = "No clear priority detected — using balanced default weights."
+        explanation = (
+            "These are the default balanced weights. The optimizer will consider racial fairness, "
+            "population equality, geographic compactness, and voting rights roughly in proportion. "
+            "Try being more specific — for example, 'prioritize minority voting rights' or "
+            "'make districts as compact as possible'."
+        )
+
+    return {
+        "suggested_params": {"racial_weight": r, "population_weight": pop, "compactness_weight": c, "vra_weight": v, "n_steps": 700},
+        "rationale": note,
+        "explanation": explanation,
+        "model": "rule-based",
+        "powered_by": "fallback",
+    }
 
 
 @router.get("/metrics")

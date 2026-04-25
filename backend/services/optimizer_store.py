@@ -77,6 +77,7 @@ def set_latest_run(
         "state_fips": state_fips,
         "assignment": assignment,
         "district_metrics": district_metrics,
+        "best_reward": optimized_reward,
     }
 
 
