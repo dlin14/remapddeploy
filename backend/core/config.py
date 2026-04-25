@@ -17,8 +17,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""          # used by LangChain if needed
     ANTHROPIC_API_KEY: str = ""       # used by Legislative Liaison node
 
-    # CORS
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000"]
+    # CORS — space-separated origins, or a JSON list, or a wildcard "*"
+    # Example in .env:  ALLOWED_ORIGINS=https://remapd.vercel.app https://remapd-*.vercel.app
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:3001"]
 
     # RL hyperparameters
     RL_ALGORITHM: str = "PPO"         # "PPO" | "SAC" | "A2C"

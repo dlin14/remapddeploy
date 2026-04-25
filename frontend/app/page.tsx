@@ -29,7 +29,7 @@ export default function HomePage() {
           remapd
         </h1>
         <p className="text-slate-400 text-base max-w-xl leading-relaxed">
-          Improving equity by fairly redefining congressional district boundaries
+          Improving equity by bringing transparency to congressional district boundaries.
         </p>
       </section>
 

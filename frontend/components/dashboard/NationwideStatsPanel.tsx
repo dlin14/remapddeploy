@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { RotateCcw } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 interface ScoreComponents {
   racial_fairness: number;
@@ -48,8 +49,8 @@ export default function NationwideStatsPanel() {
   const poll = async () => {
     try {
       const [mRes, pRes] = await Promise.all([
-        fetch("http://localhost:8000/api/agent/metrics", { cache: "no-store" }),
-        fetch("http://localhost:8000/api/agent/all-plans", { cache: "no-store" }),
+        fetch(`${API_BASE}/api/agent/metrics`, { cache: "no-store" }),
+        fetch(`${API_BASE}/api/agent/all-plans`, { cache: "no-store" }),
       ]);
       if (mRes.ok) setMetrics(await mRes.json());
       if (pRes.ok) {
@@ -76,7 +77,7 @@ export default function NationwideStatsPanel() {
   const handleReset = async (abbr: string) => {
     setResetting(abbr);
     try {
-      await fetch(`http://localhost:8000/api/agent/plans/${abbr}`, { method: "DELETE" });
+      await fetch(`${API_BASE}/api/agent/plans/${abbr}`, { method: "DELETE" });
       await poll();
     } catch {
       // ignore

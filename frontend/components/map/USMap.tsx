@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { API_BASE } from "@/lib/api";
 import * as d3 from "d3";
 import * as topojson from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
@@ -125,7 +126,7 @@ export default function USMap() {
   // ── Poll with deep-equal guard (prevents needless re-renders when data hasn't changed) ──
   useEffect(() => {
     const load = () =>
-      fetch("http://localhost:8000/api/agent/all-plans", { cache: "no-store" })
+      fetch(`${API_BASE}/api/agent/all-plans`, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (data)

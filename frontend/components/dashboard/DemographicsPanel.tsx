@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Users, DollarSign, GraduationCap, TrendingDown, AlertCircle } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 interface Demographics {
   state_name: string;
@@ -56,7 +57,7 @@ export default function DemographicsPanel({ stateAbbr }: DemographicsPanelProps)
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch(`http://localhost:8000/api/states/${stateAbbr}/demographics`)
+    fetch(`${API_BASE}/api/states/${stateAbbr}/demographics`)
       .then((r) => {
         if (!r.ok) throw new Error(`API error ${r.status}`);
         return r.json();

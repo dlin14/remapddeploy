@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { BarChart2, TrendingUp, Activity } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 export interface ScoreComponents {
   racial_fairness: number;
@@ -63,7 +64,7 @@ export default function RLMetricsPanel({ metrics: _metrics }: RLMetricsPanelProp
     let cancelled = false;
     const poll = async () => {
       try {
-        const resp = await fetch("http://localhost:8000/api/agent/metrics", { cache: "no-store" });
+        const resp = await fetch(`${API_BASE}/api/agent/metrics`, { cache: "no-store" });
         if (!resp.ok) return;
         const data = (await resp.json()) as RLMetrics;
         if (!cancelled) setMetrics(data);

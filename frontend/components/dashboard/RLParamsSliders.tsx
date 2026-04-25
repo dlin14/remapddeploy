@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Play, RotateCcw, Cpu } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 // 118th Congress apportionment
 const ABBR_TO_DISTRICTS: Record<string, number> = {
@@ -107,7 +108,7 @@ export default function RLParamsSliders({ stateAbbr, externalParams, externalPar
   useEffect(() => {
     return () => {
       if (runningRef.current) {
-        fetch("http://localhost:8000/api/agent/stop", {
+        fetch(`${API_BASE}/api/agent/stop`, {
           method: "POST",
           keepalive: true,
         }).catch(() => {});
@@ -130,7 +131,7 @@ export default function RLParamsSliders({ stateAbbr, externalParams, externalPar
     runningRef.current = true;
     setStatus("Starting optimizer...");
     try {
-      const resp = await fetch("http://localhost:8000/api/agent/run", {
+      const resp = await fetch(`${API_BASE}/api/agent/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state_abbr: stateAbbr, ...params }),
