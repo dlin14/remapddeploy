@@ -43,26 +43,6 @@ export default function HomePage() {
         <NationwideStatsPanel />
       </section>
 
-      {/* Footer stats strip */}
-      <footer className="border-t border-white/10 px-8 py-5 flex items-center justify-between gap-6 flex-wrap mt-auto">
-        <div className="flex items-center gap-8">
-          <Stat label="Optimizer" value="Simulated Annealing" />
-          <Stat label="Objective" value="Racial · Pop · Compact · VRA" />
-          <Stat label="Data" value="ACS 5-yr County FIPS" />
-        </div>
-        <p className="text-[11px] text-white/25 font-mono">
-          built for claude hackathon 2025 · anthropic
-        </p>
-      </footer>
     </main>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[10px] text-white/35 uppercase tracking-widest font-medium mb-0.5">{label}</p>
-      <p className="text-xs text-white/70 font-mono">{value}</p>
-    </div>
   );
 }

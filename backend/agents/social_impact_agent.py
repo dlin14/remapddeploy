@@ -300,14 +300,25 @@ async def _generate_liaison_memo(
         "provenance": provenance,
     }
     instruction = (
-        "You are the Legislative Liaison for a non-partisan redistricting review. "
-        "Use adaptive thinking to translate mathematical scores into plain-English policy language. "
-        "Return strict JSON with keys: simple_summary, technical_appendix, risk_level, justification. "
-        "simple_summary must be understandable to someone with no technical background. "
-        "technical_appendix should include the core score values and tradeoff notes in precise terms. "
-        "risk_level must be one of: low, medium, high. "
-        "Focus on legal risk, fairness tradeoffs, and human flourishing. "
-        "Avoid partisan framing."
+        "You are a non-partisan redistricting analysis system composed of three specialist agents. "
+        "Translate the provided quantitative scores into structured plain-English policy analysis. "
+        "Return ONLY strict JSON — no markdown fences — with exactly these keys:\n"
+        '{\n'
+        '  "engine_agent": "<plain-English explanation of how the optimization engine works and what '
+        'the score values indicate about the iterative search result. Describe weights as adjustable '
+        'policy priorities. No ML jargon. Non-technical audience.>",\n'
+        '  "civil_rights_agent": "<equity and fairness analysis. Reference voting-rights and '
+        'minority-opportunity signals. Ground claims only in the provided metrics. '
+        'If data is uncertain, say so explicitly instead of guessing.>",\n'
+        '  "legislative_agent": "<legal and policy alignment in plain English. Reference one-person-'
+        'one-vote, Voting Rights Act considerations, and compactness/population balance norms. '
+        'State clearly: this is informational analysis only, not legal advice, and formal counsel '
+        'review is required.>",\n'
+        '  "summary": "<3-5 sentence plain-language summary for a legislator. Include overall risk '
+        'level (low/medium/high) and one-sentence reason. End with a clear practical recommendation: '
+        'proceed, revise, or seek legal review first. No partisan framing. Only facts from the input.>"\n'
+        '}\n'
+        "No hallucinated numbers or laws. Be concise and decision-oriented."
     )
 
     if settings.ANTHROPIC_API_KEY:
@@ -331,13 +342,24 @@ async def _generate_liaison_memo(
                 text = "".join(
                     chunk.get("text", "") for chunk in data.get("content", []) if chunk.get("type") == "text"
                 ).strip()
-                parsed = json.loads(text)
+                if "```" in text:
+                    text = text.split("```")[1]
+                    if text.startswith("json"):
+                        text = text[4:]
+                parsed = json.loads(text.strip())
+                # Extract risk level from summary text if not a top-level key
+                raw_summary = parsed.get("summary", "")
+                risk_level = "medium"
+                for level in ("low", "medium", "high"):
+                    if f"risk level: {level}" in raw_summary.lower():
+                        risk_level = level
+                        break
                 return {
-                    "summary": parsed.get("simple_summary", ""),
-                    "simple_summary": parsed.get("simple_summary", ""),
-                    "technical_appendix": parsed.get("technical_appendix", ""),
-                    "risk_level": parsed.get("risk_level", "medium"),
-                    "justification": parsed.get("justification", ""),
+                    "engine_agent":       parsed.get("engine_agent", ""),
+                    "civil_rights_agent": parsed.get("civil_rights_agent", ""),
+                    "legislative_agent":  parsed.get("legislative_agent", ""),
+                    "summary":            raw_summary,
+                    "risk_level":         risk_level,
                     "model": settings.LIAISON_MODEL,
                     "provenance": provenance,
                 }
@@ -348,29 +370,46 @@ async def _generate_liaison_memo(
     risk_level = "low" if legal_ok and score_vector.get("total_reward", 0) >= 0.65 else "medium"
     if not legal_ok or score_vector.get("voting_rights", 0) < 0.5:
         risk_level = "high"
-    simple_summary = (
-        f"For state {state_fips}, this map looks {'lower' if risk_level == 'low' else 'higher'} risk for legal challenge. "
-        f"It keeps district populations fairly balanced and maintains strong voting-rights protection signals. "
-        f"Legal review is still required before adoption."
+
+    rf   = score_vector.get("racial_fairness", 0)
+    pe   = score_vector.get("population_equality", 0)
+    comp = score_vector.get("compactness", 0)
+    vr   = score_vector.get("voting_rights", 0)
+    opp  = score_vector.get("opportunity_districts", 0)
+
+    engine_agent = (
+        f"The optimizer ran an iterative county-by-county search to find a district assignment "
+        f"that balances four policy priorities: racial fairness, population equality, geographic "
+        f"compactness, and voting-rights protection. The combined score was "
+        f"{score_vector.get('total_reward', 0):.3f} out of 1.0. Racial fairness scored "
+        f"{rf:.3f}, population equality {pe:.3f}, compactness {comp:.3f}, and voting rights {vr:.3f}."
     )
-    technical_appendix = (
-        f"weighted_reward={score_vector.get('total_reward', 0):.3f}; "
-        f"population_equality={score_vector.get('population_equality', 0):.3f}; "
-        f"racial_fairness={score_vector.get('racial_fairness', 0):.3f}; "
-        f"compactness={score_vector.get('compactness', 0):.3f}; "
-        f"voting_rights={score_vector.get('voting_rights', 0):.3f}; "
-        f"legal_gate={'pass' if legal_ok else 'flag'}."
+    civil_rights_agent = (
+        f"The plan produced {opp} opportunity district(s) — districts where minority voters "
+        f"make up a substantial share. Racial fairness scored {rf:.3f} (1.0 = perfect proportionality). "
+        f"{'This meets the minimum threshold for meaningful minority representation.' if legal_ok else 'This falls below the minimum opportunity-district threshold, which may warrant further review.'} "
+        f"Exact legal sufficiency requires a qualified demographic and legal assessment."
     )
-    justification = (
-        "Memo generated via deterministic fallback because ANTHROPIC_API_KEY is missing "
-        "or model response was not parseable."
+    legislative_agent = (
+        f"Population equality scored {pe:.3f}, indicating {'strong' if pe >= 0.8 else 'moderate' if pe >= 0.5 else 'weak'} "
+        f"alignment with one-person-one-vote norms. Compactness scored {comp:.3f}. "
+        f"The voting-rights score of {vr:.3f} reflects the proportion of opportunity districts relative "
+        f"to the state's minority population share. This is informational analysis only — it is not "
+        f"legal advice. Formal legal counsel must review any map before adoption."
+    )
+    summary = (
+        f"Overall risk level: {risk_level}. "
+        f"The optimizer achieved a combined fairness score of {score_vector.get('total_reward', 0):.3f}. "
+        f"{'Legal and equity signals are broadly positive.' if risk_level == 'low' else 'One or more equity dimensions warrants closer review.' if risk_level == 'medium' else 'Significant equity or legal concerns were flagged.'} "
+        f"{'Recommendation: proceed to legal review.' if risk_level == 'low' else 'Recommendation: revise weights and re-run before legal review.' if risk_level == 'medium' else 'Recommendation: seek legal review before proceeding further.'} "
+        f"Note: this analysis was generated via a deterministic fallback — configure ANTHROPIC_API_KEY for Claude-powered analysis."
     )
     return {
-        "summary": simple_summary,
-        "simple_summary": simple_summary,
-        "technical_appendix": technical_appendix,
-        "risk_level": risk_level,
-        "justification": justification,
-        "model": settings.LIAISON_MODEL,
-        "provenance": provenance,
+        "engine_agent":       engine_agent,
+        "civil_rights_agent": civil_rights_agent,
+        "legislative_agent":  legislative_agent,
+        "summary":            summary,
+        "risk_level":         risk_level,
+        "model":              "rule-based-fallback",
+        "provenance":         provenance,
     }

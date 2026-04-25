@@ -92,3 +92,8 @@ def get_all_plans() -> dict[str, dict[str, Any]]:
 
 def get_plan(state_abbr: str) -> dict[str, Any] | None:
     return _latest_plans.get(state_abbr.upper())
+
+
+def remove_plan(state_abbr: str) -> bool:
+    """Delete a cached plan. Returns True if it existed."""
+    return _latest_plans.pop(state_abbr.upper(), None) is not None

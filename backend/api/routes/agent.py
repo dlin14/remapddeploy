@@ -18,6 +18,7 @@ from services.optimizer_store import (
     get_all_plans,
     get_metrics,
     get_plan,
+    remove_plan,
     request_cancel,
     set_latest_run,
 )
@@ -109,33 +110,46 @@ async def suggest_params(payload: SuggestParamsPayload):
     """Use Claude to translate a natural-language request into RL weight suggestions."""
     state_abbr = payload.state_abbr.upper()
 
-    system = (
-        "You are an expert redistricting optimization assistant helping policymakers "
-        "understand how algorithmic parameters shape district maps. "
-        "Translate the user's plain-English request into RL optimizer parameters. "
-        "Return ONLY strict JSON — no markdown, no extra keys — with exactly these keys:\n"
-        '{"racial_weight": <0-1>, "population_weight": <0-1>, '
-        '"compactness_weight": <0-1>, "vra_weight": <0-1>, '
-        '"n_steps": <200-2000>, "rationale": "<one concise sentence>", '
-        '"explanation": "<2-3 sentences in plain English: what will the optimizer do differently, '
-        'what might the resulting map look like, and what real-world fairness impact does this have>"}\n'
-        "The four weights must sum to 1.0. Adjust them to reflect the user's stated priorities. "
-        "Write the explanation for a general audience — no jargon, no math notation."
+    SECTION_SYSTEM = (
+        "You are a non-partisan redistricting analysis system composed of three specialist agents. "
+        "Given a user request and current optimizer parameters, return ONLY strict JSON — no markdown fences — "
+        "with exactly these keys:\n"
+        '{\n'
+        '  "racial_weight": <float 0-1>,\n'
+        '  "population_weight": <float 0-1>,\n'
+        '  "compactness_weight": <float 0-1>,\n'
+        '  "vra_weight": <float 0-1>,\n'
+        '  "n_steps": <int 200-2000>,\n'
+        '  "engine_agent": "<plain-English explanation of how the optimization engine works and what '
+        'the suggested weight changes will cause the iterative search to do differently. Describe '
+        'weights as adjustable policy priorities. No ML jargon. Non-technical audience.>",\n'
+        '  "civil_rights_agent": "<equity and fairness analysis of the suggested plan priorities. '
+        'Reference voting-rights and minority-opportunity signals. Ground claims only in the provided '
+        'metrics. If data is uncertain, say so explicitly instead of guessing.>",\n'
+        '  "legislative_agent": "<legal and policy alignment in plain English. Reference one-person-'
+        'one-vote, Voting Rights Act considerations, and compactness/population balance norms. '
+        'State clearly: this is informational analysis only, not legal advice, and formal counsel '
+        'review is required.>",\n'
+        '  "summary": "<3-5 sentence plain-language summary for a legislator. Include overall risk '
+        'level (low/medium/high) and one-sentence reason. End with a clear practical recommendation: '
+        'proceed, revise, or seek legal review first. No partisan framing. Only facts from the input.>"\n'
+        '}\n'
+        "The four weights must sum to 1.0. No hallucinated numbers or laws. Be concise and decision-oriented."
     )
     user_content = (
         f"State: {state_abbr}\n"
-        f"Current parameters: {json.dumps(payload.current_params)}\n"
+        f"Current optimizer parameters: {json.dumps(payload.current_params)}\n"
         f"User request: {payload.prompt}\n\n"
-        "Return suggested RL optimizer parameters as JSON."
+        "Return the four-section analysis and suggested parameters as JSON."
     )
 
     if settings.ANTHROPIC_API_KEY:
         try:
             body = {
                 "model": settings.LIAISON_MODEL,
-                "max_tokens": 350,
+                "max_tokens": 900,
                 "temperature": 0.2,
-                "system": system,
+                "system": SECTION_SYSTEM,
                 "messages": [{"role": "user", "content": user_content}],
             }
             headers = {
@@ -143,7 +157,7 @@ async def suggest_params(payload: SuggestParamsPayload):
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             }
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages", json=body, headers=headers
                 )
@@ -153,7 +167,6 @@ async def suggest_params(payload: SuggestParamsPayload):
                     for c in resp.json().get("content", [])
                     if c.get("type") == "text"
                 ).strip()
-                # Strip optional markdown code fences
                 if "```" in text:
                     text = text.split("```")[1]
                     if text.startswith("json"):
@@ -165,73 +178,172 @@ async def suggest_params(payload: SuggestParamsPayload):
 
                 return {
                     "suggested_params": {
-                        "racial_weight": clamp(parsed.get("racial_weight", 0.35), 0, 1),
+                        "racial_weight":     clamp(parsed.get("racial_weight", 0.35), 0, 1),
                         "population_weight": clamp(parsed.get("population_weight", 0.30), 0, 1),
-                        "compactness_weight": clamp(parsed.get("compactness_weight", 0.20), 0, 1),
-                        "vra_weight": clamp(parsed.get("vra_weight", 0.15), 0, 1),
-                        "n_steps": max(200, min(2000, int(parsed.get("n_steps", 700)))),
+                        "compactness_weight":clamp(parsed.get("compactness_weight", 0.20), 0, 1),
+                        "vra_weight":        clamp(parsed.get("vra_weight", 0.15), 0, 1),
+                        "n_steps":           max(200, min(2000, int(parsed.get("n_steps", 700)))),
                     },
-                    "rationale": str(parsed.get("rationale", "Parameters adjusted to reflect your priorities.")),
-                    "explanation": str(parsed.get("explanation", "")),
+                    "engine_agent":       str(parsed.get("engine_agent", "")),
+                    "civil_rights_agent": str(parsed.get("civil_rights_agent", "")),
+                    "legislative_agent":  str(parsed.get("legislative_agent", "")),
+                    "summary":            str(parsed.get("summary", "")),
                     "model": settings.LIAISON_MODEL,
                     "powered_by": "claude",
                 }
         except Exception:
             pass  # fall through to rule-based
 
-    # Rule-based fallback (no API key or parse error)
+    # ── Rule-based fallback ───────────────────────────────────────────────────
     p = payload.prompt.lower()
+
     if any(w in p for w in ["racial", "race", "minority", "diversity", "representation"]):
         r, pop, c, v = 0.50, 0.25, 0.15, 0.10
-        note = "Boosted racial fairness weight to prioritize minority representation."
-        explanation = (
-            "The optimizer will work much harder to keep each district's racial composition "
-            "proportional to the state's overall demographics. Expect districts that closely mirror "
-            "the minority share of the population — this may produce slightly less geographically "
-            "tidy shapes, but communities of color are more likely to have meaningful representation."
+        engine = (
+            "The optimizer runs an iterative county-by-county search. With racial fairness set as "
+            "the top priority (weight 0.50), it will strongly favor arrangements where each district "
+            "reflects the state's overall racial composition. The other three priorities — population "
+            "balance, geographic shape, and voting-rights protection — are reduced to make room."
+        )
+        civil = (
+            "Elevating the racial fairness priority increases the likelihood that minority communities "
+            "are proportionally represented across districts. This reduces the risk of cracking or "
+            "packing, where minority voters are deliberately diluted or over-concentrated. Exact equity "
+            "outcomes depend on the state's demographic distribution, which the optimizer uses as its target."
+        )
+        leg = (
+            "A higher racial fairness weight aligns with principles underlying Section 2 of the Voting "
+            "Rights Act, which prohibits maps that dilute minority voting power. Population balance "
+            "(one-person-one-vote) remains present but is weighted lower. This is informational analysis "
+            "only — it is not legal advice. Formal legal counsel must review any map before adoption."
+        )
+        summary = (
+            "This configuration prioritizes racial fairness above other criteria. Risk level: medium — "
+            "while the intent aligns with equity principles, lower compactness weight may draw scrutiny "
+            "on geographic grounds. Recommendation: proceed with optimization, then have legal counsel "
+            "review the output map for VRA compliance before any official use."
         )
     elif any(w in p for w in ["compact", "geographic", "shape", "contiguous"]):
         r, pop, c, v = 0.25, 0.25, 0.40, 0.10
-        note = "Boosted compactness weight for more geographically coherent districts."
-        explanation = (
-            "The optimizer will strongly prefer districts that are geographically tight and "
-            "contiguous — think fewer oddly-shaped, sprawling boundaries. The resulting map will "
-            "look cleaner and be easier to explain to constituents, though racial and population "
-            "balance may take a back seat."
+        engine = (
+            "With compactness set as the leading priority (weight 0.40), the optimizer will favor "
+            "county groupings that are geographically tight and contiguous. The search penalizes "
+            "sprawling, irregular arrangements. Racial fairness and population equality are still "
+            "present but carry less influence over which solutions are accepted."
+        )
+        civil = (
+            "Prioritizing compactness can produce cleaner-looking districts, but may reduce the "
+            "optimizer's ability to group minority communities that are geographically dispersed. "
+            "If the state has spatially concentrated minority populations, compactness and equity "
+            "goals may be compatible. If not, equity outcomes could decline. Specific impact depends "
+            "on the state's demographic geography, which cannot be assessed without census-level data."
+        )
+        leg = (
+            "Compactness is a recognized redistricting criterion in many state constitutions and "
+            "has been cited in court challenges. However, compactness alone is not a legal requirement "
+            "under federal law, and overly compact maps can still violate the Voting Rights Act if they "
+            "dilute minority representation. This is informational analysis only — not legal advice. "
+            "Formal counsel review is required."
+        )
+        summary = (
+            "This configuration emphasizes geographic compactness and tidiness of district shapes. "
+            "Risk level: low for gerrymandering challenges based on shape; medium if minority "
+            "communities are geographically dispersed. Recommendation: proceed with optimization, "
+            "then verify equity metrics in the output before finalizing."
         )
     elif any(w in p for w in ["vra", "voting", "rights", "opportunity", "section 2"]):
         r, pop, c, v = 0.20, 0.20, 0.10, 0.50
-        note = "Boosted VRA weight to maximize minority opportunity districts."
-        explanation = (
-            "The optimizer will try to create as many 'opportunity districts' as possible — "
-            "districts where minority voters have a realistic chance of electing their preferred "
-            "candidate. This directly addresses Section 2 of the Voting Rights Act. Shape and "
-            "pure population balance matter less here; what counts is giving underrepresented "
-            "communities real political power."
+        engine = (
+            "The voting-rights priority (weight 0.50) now dominates the optimizer's scoring. The "
+            "iterative search will strongly favor maps that maximize the number of districts where "
+            "minority voters make up a substantial share — often called opportunity districts. "
+            "Geographic compactness is reduced significantly to allow this."
+        )
+        civil = (
+            "Maximizing the voting-rights weight directly targets the creation of minority opportunity "
+            "districts, which is the primary mechanism for VRA Section 2 compliance. The optimizer "
+            "defines an opportunity district as one where minority share reaches or exceeds 45%. "
+            "Actual legal sufficiency depends on state-specific demographic thresholds and must be "
+            "assessed by qualified legal and demographic experts."
+        )
+        leg = (
+            "This configuration is explicitly oriented toward Section 2 of the Voting Rights Act, "
+            "which requires that minority communities have a meaningful opportunity to elect "
+            "representatives of their choice. One-person-one-vote remains present (weight 0.20) but "
+            "is secondary. This is informational analysis only — it is not legal advice. Compliance "
+            "with the VRA requires formal legal and demographic review."
+        )
+        summary = (
+            "This configuration aggressively prioritizes voting-rights protections and minority "
+            "opportunity districts. Risk level: low for VRA dilution claims; medium for compactness "
+            "challenges due to the reduced shape priority. Recommendation: proceed with optimization, "
+            "then seek legal review focused on VRA compliance and compactness before any official use."
         )
     elif any(w in p for w in ["population", "equal", "balance", "fair"]):
         r, pop, c, v = 0.25, 0.50, 0.15, 0.10
-        note = "Boosted population equality for more balanced district sizes."
-        explanation = (
-            "Each district will be pushed toward having the same number of people, minimizing "
-            "the advantage that comes from packing voters into unusually large or small districts. "
-            "This is the 'one person, one vote' principle — every citizen's vote carries roughly "
-            "equal weight regardless of which district they live in."
+        engine = (
+            "Population equality is now the dominant optimizer priority (weight 0.50). The iterative "
+            "search will strongly favor county arrangements where every district contains roughly the "
+            "same number of people. This is the computational expression of the one-person-one-vote "
+            "principle. Racial and geographic priorities are reduced to support this goal."
+        )
+        civil = (
+            "High population equality reduces the structural advantage that over- or under-populated "
+            "districts give to particular voter groups. However, population balance alone does not "
+            "guarantee minority representation — a perfectly population-equal map can still dilute "
+            "minority voting power if communities are distributed unfavorably. The optimizer's racial "
+            "fairness weight (0.25) provides some protection, but equity outcomes should be verified "
+            "in the output."
+        )
+        leg = (
+            "Population equality is the foundational requirement under the Supreme Court's one-person-"
+            "one-vote doctrine, established in Reynolds v. Sims (1964). Congressional districts must "
+            "be as equal in population as practicable. This configuration directly targets that "
+            "standard. However, population equality is necessary but not sufficient — VRA and racial "
+            "fairness considerations must also be satisfied. This is informational analysis only, not "
+            "legal advice. Formal counsel review is required."
+        )
+        summary = (
+            "This configuration prioritizes equal population across all districts above other criteria. "
+            "Risk level: low for one-person-one-vote challenges; medium if racial fairness metrics "
+            "decline as a result. Recommendation: proceed with optimization, then review the output "
+            "map for equity and VRA compliance before any official use."
         )
     else:
         r, pop, c, v = 0.35, 0.30, 0.20, 0.15
-        note = "No clear priority detected — using balanced default weights."
-        explanation = (
-            "These are the default balanced weights. The optimizer will consider racial fairness, "
-            "population equality, geographic compactness, and voting rights roughly in proportion. "
-            "Try being more specific — for example, 'prioritize minority voting rights' or "
-            "'make districts as compact as possible'."
+        engine = (
+            "The optimizer uses a balanced default configuration, treating racial fairness (0.35), "
+            "population equality (0.30), geographic compactness (0.20), and voting-rights protection "
+            "(0.15) as its four policy priorities. The iterative search explores county-to-district "
+            "assignments and accepts changes that improve the combined score. Try specifying a clearer "
+            "priority — for example, 'prioritize minority voting rights' or 'focus on compactness'."
+        )
+        civil = (
+            "With balanced weights, the optimizer will not strongly favor or disadvantage any single "
+            "equity dimension. Minority representation signals (voting-rights weight 0.15) are present "
+            "but not dominant. If equity is a primary concern for this state, consider increasing the "
+            "racial fairness or VRA weights explicitly."
+        )
+        leg = (
+            "The balanced default addresses multiple legal redistricting criteria simultaneously: "
+            "population equality (one-person-one-vote), racial fairness (VRA alignment), and "
+            "compactness (a common state-level criterion). No single criterion dominates. This is "
+            "informational analysis only — it is not legal advice. Formal counsel review is required "
+            "before any map is used officially."
+        )
+        summary = (
+            "This is the balanced default configuration. Risk level: medium — no single legal "
+            "criterion is neglected, but none is strongly optimized either. Recommendation: specify "
+            "a clearer policy priority before running the optimizer to get more targeted results, "
+            "then have legal counsel review the output map."
         )
 
     return {
         "suggested_params": {"racial_weight": r, "population_weight": pop, "compactness_weight": c, "vra_weight": v, "n_steps": 700},
-        "rationale": note,
-        "explanation": explanation,
+        "engine_agent":       engine,
+        "civil_rights_agent": civil,
+        "legislative_agent":  leg,
+        "summary":            summary,
         "model": "rule-based",
         "powered_by": "fallback",
     }
@@ -246,6 +358,15 @@ async def metrics():
 async def all_plans():
     """All cached district plans keyed by state_abbr — used by the home map."""
     return get_all_plans()
+
+
+@router.delete("/plans/{state_abbr}")
+async def delete_plan(state_abbr: str):
+    """Remove a cached optimizer plan so the state resets to real district boundaries."""
+    existed = remove_plan(state_abbr)
+    if not existed:
+        raise HTTPException(status_code=404, detail=f"No plan found for {state_abbr.upper()}")
+    return {"status": "deleted", "state_abbr": state_abbr.upper()}
 
 
 @router.get("/liaison/model")

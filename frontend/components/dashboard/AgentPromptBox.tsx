@@ -13,8 +13,10 @@ export interface SuggestedParams {
 
 export interface AgentSuggestion {
   suggested_params: SuggestedParams;
-  rationale: string;
-  explanation: string;
+  engine_agent: string;
+  civil_rights_agent: string;
+  legislative_agent: string;
+  summary: string;
   model: string;
   powered_by: string;
 }
@@ -24,6 +26,13 @@ interface AgentPromptBoxProps {
   currentParams: Record<string, number>;
   onApply: (params: SuggestedParams) => void;
 }
+
+const SECTIONS = [
+  { key: "engine_agent",       label: "Engine Agent",              accent: "text-sky-400" },
+  { key: "civil_rights_agent", label: "Civil Rights Advocate Agent", accent: "text-emerald-400" },
+  { key: "legislative_agent",  label: "Legislative Agent",          accent: "text-violet-400" },
+  { key: "summary",            label: "Summary",                    accent: "text-amber-400" },
+] as const;
 
 const QUICK_PROMPTS = [
   "Prioritize minority representation",
@@ -156,14 +165,20 @@ export default function AgentPromptBox({
         {/* Agent response */}
         {suggestion && (
           <div className="space-y-4">
-            {/* Plain-English explanation */}
-            <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/8 px-5 py-4 space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-400">
-                Agent Analysis
-              </p>
-              <p className="text-sm text-white/80 leading-relaxed">
-                {suggestion.explanation || suggestion.rationale}
-              </p>
+            {/* Four structured sections */}
+            <div className="rounded-xl border border-white/10 bg-white/3 divide-y divide-white/8 overflow-hidden">
+              {SECTIONS.map(({ key, label, accent }) => {
+                const text = suggestion[key as keyof AgentSuggestion] as string;
+                if (!text) return null;
+                return (
+                  <div key={key} className="px-5 py-4 space-y-1.5">
+                    <p className={`text-[10px] font-bold uppercase tracking-widest ${accent}`}>
+                      {label}
+                    </p>
+                    <p className="text-sm text-white/75 leading-relaxed">{text}</p>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Parameter diff grid */}

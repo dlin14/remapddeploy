@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { RotateCcw } from "lucide-react";
 
 interface ScoreComponents {
   racial_fairness: number;
@@ -41,30 +42,50 @@ function Delta({ val }: { val: number }) {
 
 export default function NationwideStatsPanel() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [stateCount, setStateCount] = useState(0);
+  const [optimizedStates, setOptimizedStates] = useState<string[]>([]);
+  const [resetting, setResetting] = useState<string | null>(null);
+
+  const poll = async () => {
+    try {
+      const [mRes, pRes] = await Promise.all([
+        fetch("http://localhost:8000/api/agent/metrics", { cache: "no-store" }),
+        fetch("http://localhost:8000/api/agent/all-plans", { cache: "no-store" }),
+      ]);
+      if (mRes.ok) setMetrics(await mRes.json());
+      if (pRes.ok) {
+        const plans = await pRes.json();
+        setOptimizedStates(Object.keys(plans).sort());
+      }
+    } catch {
+      // backend not ready yet
+    }
+  };
 
   useEffect(() => {
     let dead = false;
-    const poll = async () => {
-      try {
-        const [mRes, pRes] = await Promise.all([
-          fetch("http://localhost:8000/api/agent/metrics", { cache: "no-store" }),
-          fetch("http://localhost:8000/api/agent/all-plans", { cache: "no-store" }),
-        ]);
-        if (mRes.ok && !dead) setMetrics(await mRes.json());
-        if (pRes.ok && !dead) setStateCount(Object.keys(await pRes.json()).length);
-      } catch {
-        // backend not ready yet
-      }
-    };
-    poll();
-    const t = setInterval(poll, 3500);
+    const safePoll = async () => { if (!dead) await poll(); };
+    safePoll();
+    const t = setInterval(safePoll, 3500);
     return () => {
       dead = true;
       clearInterval(t);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleReset = async (abbr: string) => {
+    setResetting(abbr);
+    try {
+      await fetch(`http://localhost:8000/api/agent/plans/${abbr}`, { method: "DELETE" });
+      await poll();
+    } catch {
+      // ignore
+    } finally {
+      setResetting(null);
+    }
+  };
+
+  const stateCount = optimizedStates.length;
   const hasRun = metrics?.improvement != null &&
     typeof metrics.optimizedReward === "number" &&
     typeof metrics.baselineReward === "number";
@@ -98,6 +119,31 @@ export default function NationwideStatsPanel() {
               </span>
             )}
           </p>
+          {/* Per-state reset chips */}
+          {stateCount > 0 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {optimizedStates.map((abbr) => (
+                <div
+                  key={abbr}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-xs font-mono text-indigo-300"
+                >
+                  {abbr}
+                  <button
+                    onClick={() => handleReset(abbr)}
+                    disabled={resetting === abbr}
+                    title={`Reset ${abbr} to real district boundaries`}
+                    className="ml-0.5 text-white/30 hover:text-red-400 transition-colors disabled:opacity-40"
+                  >
+                    {resetting === abbr ? (
+                      <span className="w-3 h-3 rounded-full border border-white/30 border-t-white animate-spin inline-block" />
+                    ) : (
+                      <RotateCcw size={11} />
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         {typeof optimizedReward === "number" && typeof baselineReward === "number" && (
           <div className="text-right shrink-0">

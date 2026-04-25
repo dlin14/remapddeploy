@@ -152,12 +152,12 @@ export default function StateMap({ stateFips, stateName }: StateMapProps) {
       // ── Caption ───────────────────────────────────────────────────────────
       g.append("text")
         .attr("class", "caption")
-        .attr("x", (W - 40) / 2)
-        .attr("y", H - 55)
-        .attr("text-anchor", "middle")
-        .attr("font-size", 10)
-        .attr("fill", "rgba(255,255,255,0.25)")
-        .text("118th Congress · official boundaries");
+        .attr("x", 6)
+        .attr("y", H - 58)
+        .attr("text-anchor", "start")
+        .attr("font-size", 9.5)
+        .attr("fill", "rgba(255,255,255,0.28)")
+        .text("Source: U.S. Census Bureau · 118th Congress boundaries");
 
       structureReadyRef.current = true;
       applyOptimizerColors(svg, planRef.current, districtColor, false);
@@ -184,7 +184,7 @@ export default function StateMap({ stateFips, stateName }: StateMapProps) {
       <div className="px-4 py-2.5 border-b border-white/10 bg-slate-800/60 flex items-center justify-between">
         <span className="text-sm font-semibold text-white/90">{stateName} — District Map</span>
         <span className="text-xs text-white/35">
-          {optimizerRan ? "Optimizer assignment (county-level)" : "118th Congress · official boundaries"}
+          {optimizerRan ? "remapd optimizer · county-level" : "U.S. Census Bureau · 118th Congress"}
         </span>
       </div>
       <svg
@@ -229,7 +229,7 @@ function applyOptimizerColors(
     // Show real district boundaries, hide county overlay
     svg.selectAll("path.real-district").attr("fill-opacity", 0.75).attr("stroke-opacity", 1);
     svg.selectAll("path.county").attr("fill", "none");
-    svg.selectAll("text.caption").text("118th Congress · official boundaries");
+    svg.selectAll("text.caption").text("Source: U.S. Census Bureau · 118th Congress boundaries");
     return;
   }
 
@@ -243,5 +243,5 @@ function applyOptimizerColors(
     })
     .attr("stroke", "rgba(255,255,255,0.15)")
     .attr("stroke-width", 0.4);
-  svg.selectAll("text.caption").text("Optimizer assignment · county-level approximation");
+  svg.selectAll("text.caption").text("Source: remapd optimizer · county-level approximation");
 }
