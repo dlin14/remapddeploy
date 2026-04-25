@@ -22,9 +22,13 @@ app.add_middleware(
 
 from api.routes.states import router as states_router
 from api.routes.agent import router as agent_router
+from api.routes.mcp import router as mcp_router
+from api.routes.policy import router as policy_router
 
 app.include_router(states_router)
 app.include_router(agent_router)
+app.include_router(mcp_router)
+app.include_router(policy_router)
 
 
 @app.get("/health")

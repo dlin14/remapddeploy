@@ -1,14 +1,21 @@
 """Central config — RL hyperparameters and environment variables."""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Always load backend/.env regardless of process cwd (uvicorn may start from repo root).
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+_ENV_FILE = _BACKEND_ROOT / ".env"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, env_file_encoding="utf-8")
 
     # API keys
     CENSUS_API_KEY: str = ""
     OPENAI_API_KEY: str = ""          # used by LangChain if needed
+    ANTHROPIC_API_KEY: str = ""       # used by Legislative Liaison node
 
     # CORS
     ALLOWED_ORIGINS: list[str] = ["http://localhost:3000"]
@@ -29,6 +36,9 @@ class Settings(BaseSettings):
 
     # DuckDB
     DUCKDB_PATH: str = "data/remapd.duckdb"
+
+    # LLM defaults
+    LIAISON_MODEL: str = "claude-3-5-sonnet-20241022"
 
 
 settings = Settings()
