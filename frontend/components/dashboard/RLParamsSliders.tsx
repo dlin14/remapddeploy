@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Play, RotateCcw, Cpu } from "lucide-react";
 
 interface RLParams {
@@ -42,8 +42,8 @@ function SliderRow({ label, value, min, max, step, format, onChange }: SliderRow
   return (
     <div className="space-y-1">
       <div className="flex justify-between items-center">
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <span className="text-xs font-mono font-medium text-foreground">{display}</span>
+        <span className="text-xs text-white/50">{label}</span>
+        <span className="text-xs font-mono font-medium text-white/80">{display}</span>
       </div>
       <input
         type="range"
@@ -80,6 +80,19 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<RunResponse | null>(null);
+  const runningRef = useRef(false);
+
+  // Stop the optimizer when the user navigates away from the state page
+  useEffect(() => {
+    return () => {
+      if (runningRef.current) {
+        fetch("http://localhost:8000/api/agent/stop", {
+          method: "POST",
+          keepalive: true,
+        }).catch(() => {});
+      }
+    };
+  }, []);
 
   const set = useCallback(<K extends keyof RLParams>(key: K, val: RLParams[K]) => {
     setParams((p) => ({ ...p, [key]: val }));
@@ -92,6 +105,7 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
 
   const handleRun = async () => {
     setRunning(true);
+    runningRef.current = true;
     setStatus("Starting optimizer...");
     try {
       const resp = await fetch("http://localhost:8000/api/agent/run", {
@@ -109,6 +123,7 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
       setStatus("Could not reach backend optimizer. Check API server on port 8000.");
     } finally {
       setRunning(false);
+      runningRef.current = false;
     }
   };
 
@@ -116,7 +131,7 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
     <div className="space-y-5">
       {/* RL hyperparameters */}
       <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="text-xs font-semibold uppercase tracking-wider text-white/35">
           RL Hyperparameters
         </p>
         <SliderRow
@@ -158,10 +173,10 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
       {/* Reward weights */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/35">
             Reward Weights
           </p>
-          <span className={`text-[10px] font-mono ${Number(rewardWeightTotal) > 1.01 ? "text-destructive" : "text-muted-foreground"}`}>
+          <span className={`text-[10px] font-mono ${Number(rewardWeightTotal) > 1.01 ? "text-red-400" : "text-white/35"}`}>
             Σ = {rewardWeightTotal}
           </span>
         </div>
@@ -211,7 +226,7 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
             setStatus(null);
             setLastRun(null);
           }}
-          className="flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted transition-colors"
+          className="flex items-center justify-center gap-1.5 rounded-lg border border-white/15 px-3 py-2 text-xs text-white/60 hover:bg-white/5 transition-colors"
           title="Reset to defaults"
         >
           <RotateCcw size={12} />
@@ -219,7 +234,7 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
       </div>
 
       {status && (
-        <div className="flex items-start gap-1.5 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+        <div className="flex items-start gap-1.5 text-xs text-white/50 bg-white/5 rounded-lg px-3 py-2">
           <Cpu size={12} className="mt-0.5 shrink-0" />
           {status}
         </div>
@@ -228,18 +243,18 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
       {lastRun?.improvement &&
         typeof lastRun.baseline_reward === "number" &&
         typeof lastRun.best_reward === "number" && (
-          <div className="rounded-lg border border-border bg-background px-3 py-2 space-y-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-white/40">
               Fairness vs baseline
             </p>
-            <p className="text-[10px] text-muted-foreground leading-snug">
+            <p className="text-[10px] text-white/30 leading-snug">
               Baseline = round-robin initial labels (not real congressional districts).
             </p>
-            <div className="text-[11px] font-mono text-foreground">
+            <div className="text-[11px] font-mono text-white/80">
               Reward {lastRun.baseline_reward.toFixed(3)} → {lastRun.best_reward.toFixed(3)}
               <span
                 className={
-                  lastRun.improvement.total_reward_delta >= 0 ? " text-emerald-700" : " text-amber-800"
+                  lastRun.improvement.total_reward_delta >= 0 ? " text-emerald-400" : " text-amber-400"
                 }
               >
                 {" "}
@@ -247,7 +262,7 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
                 {lastRun.improvement.total_reward_delta.toFixed(3)})
               </span>
               {lastRun.improvement.total_reward_pct_vs_baseline != null && (
-                <span className="text-muted-foreground">
+                <span className="text-white/30">
                   {" "}
                   [{lastRun.improvement.total_reward_pct_vs_baseline >= 0 ? "+" : ""}
                   {lastRun.improvement.total_reward_pct_vs_baseline}% vs baseline]
@@ -273,9 +288,9 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
                     : "—";
                 return (
                   <div key={key} className="leading-tight">
-                    <span className="text-muted-foreground">{title}: </span>
+                    <span className="text-white/40">{title}: </span>
                     {b.toFixed(2)} → {o.toFixed(2)}
-                    <span className={c.delta >= 0 ? " text-emerald-700" : " text-amber-800"}>
+                    <span className={c.delta >= 0 ? " text-emerald-400" : " text-amber-400"}>
                       {" "}
                       (Δ {c.delta >= 0 ? "+" : ""}
                       {c.delta.toFixed(3)}, {pct})

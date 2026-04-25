@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from api.routes.states import ABBR_TO_FIPS
 from models.agent.rl_agent import OptimizerParams, RLAgent
-from services.optimizer_store import get_metrics, set_latest_run
+from services.optimizer_store import get_metrics, get_all_plans, set_latest_run, request_cancel
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -72,6 +72,19 @@ async def run_agent(payload: RunAgentPayload):
     }
 
 
+@router.post("/stop")
+async def stop_agent():
+    """Signal the running optimizer to stop and save best-so-far."""
+    request_cancel()
+    return {"status": "stop_requested"}
+
+
 @router.get("/metrics")
 async def metrics():
     return get_metrics()
+
+
+@router.get("/all-plans")
+async def all_plans():
+    """All cached district plans keyed by state_abbr — used by the home map."""
+    return get_all_plans()

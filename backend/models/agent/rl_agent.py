@@ -15,6 +15,8 @@ from typing import Any
 
 import numpy as np
 
+from services.optimizer_store import should_cancel, reset_cancel
+
 
 @dataclass
 class OptimizerParams:
@@ -48,6 +50,7 @@ class RLAgent:
 
     def run(self) -> dict[str, Any]:
         """Execute local search and return best plan + metric traces."""
+        reset_cancel()
         baseline_assignment = self._initial_assignment()
         baseline_breakdown = self._reward_breakdown(baseline_assignment)
         baseline_reward = baseline_breakdown["total"]
@@ -65,6 +68,8 @@ class RLAgent:
         temperature = self.params.temperature
 
         for _ in range(max(50, self.params.iterations)):
+            if should_cancel():
+                break
             proposal = current.copy()
             county_idx = int(np.random.randint(0, len(self.county_ids)))
             county_id = self.county_ids[county_idx]
@@ -226,6 +231,20 @@ class RLAgent:
                 "minority_share": minority_share,
             }
         return features
+
+    @classmethod
+    def default_plan(cls, state_fips: str, n_districts: int = 5) -> dict[str, Any]:
+        """Round-robin assignment with no optimization — served before first run."""
+        params = OptimizerParams(n_districts=n_districts, iterations=1)
+        agent = cls(state_fips=state_fips, params=params)
+        assignment = agent._initial_assignment()
+        district_metrics = agent._district_metrics(assignment)
+        return {
+            "state_abbr": state_fips,   # caller overwrites with proper abbr
+            "state_fips": state_fips,
+            "assignment": assignment,
+            "district_metrics": district_metrics,
+        }
 
     def _load_counties_for_state(self, state_fips: str) -> list[str]:
         root = Path(__file__).resolve().parents[3]

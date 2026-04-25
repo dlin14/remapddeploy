@@ -27,6 +27,21 @@ _latest_metrics: dict[str, Any] = {
     "improvement": None,
 }
 _latest_plans: dict[str, dict[str, Any]] = {}
+_cancel_requested: bool = False
+
+
+def request_cancel() -> None:
+    global _cancel_requested
+    _cancel_requested = True
+
+
+def reset_cancel() -> None:
+    global _cancel_requested
+    _cancel_requested = False
+
+
+def should_cancel() -> bool:
+    return _cancel_requested
 
 
 def set_latest_run(
@@ -67,6 +82,11 @@ def set_latest_run(
 
 def get_metrics() -> dict[str, Any]:
     return _latest_metrics
+
+
+def get_all_plans() -> dict[str, dict[str, Any]]:
+    """Return all cached plans keyed by state_abbr."""
+    return dict(_latest_plans)
 
 
 def get_plan(state_abbr: str) -> dict[str, Any] | None:

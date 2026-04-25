@@ -70,41 +70,43 @@ export default async function StatePage({ params }: StatePageProps) {
   if (!info) notFound();
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
+    <div className="flex flex-col min-h-screen bg-slate-950 text-white">
       {/* Top bar */}
-      <header className="flex items-center gap-3 px-6 py-3 border-b border-border bg-background/80 backdrop-blur sticky top-0 z-20">
+      <header className="flex items-center gap-3 px-6 py-3 border-b border-white/10 bg-slate-950/90 backdrop-blur sticky top-0 z-20">
         <Link
           href="/"
-          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1.5 text-sm text-white/50 hover:text-white/90 transition-colors"
         >
           <ArrowLeft size={14} />
           All States
         </Link>
-        <span className="text-muted-foreground">/</span>
-        <span className="text-sm font-semibold">{info.name}</span>
-        <span className="ml-auto text-xs text-muted-foreground">
-          FIPS: {info.fips} · {abbr}
+        <span className="text-white/20">/</span>
+        <span className="text-sm font-semibold text-white/90">{info.name}</span>
+        <span className="ml-auto text-xs text-white/30 font-mono">
+          FIPS {info.fips} · {abbr}
         </span>
       </header>
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Map — center */}
+        {/* Map */}
         <main className="flex-1 p-6 overflow-auto">
           <StateMap stateFips={info.fips} stateName={info.name} />
         </main>
 
         {/* Sidebar */}
-        <aside className="w-80 border-l border-border flex flex-col overflow-y-auto">
-          {/* Demographics */}
-          <div className="p-4 border-b border-border">
-            <h2 className="text-sm font-semibold mb-3">Demographics</h2>
+        <aside className="w-80 border-l border-white/10 flex flex-col overflow-y-auto bg-slate-900/40">
+          <div className="p-4 border-b border-white/10">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">
+              Demographics
+            </h2>
             <DemographicsPanel stateAbbr={abbr} />
           </div>
 
-          {/* RL Parameters */}
           <div className="p-4">
-            <h2 className="text-sm font-semibold mb-3">RL Parameters</h2>
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">
+              RL Parameters
+            </h2>
             <RLParamsSliders stateAbbr={abbr} />
           </div>
         </aside>

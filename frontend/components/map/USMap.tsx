@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as d3 from "d3";
 import * as topojson from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 
-// FIPS → state name + abbreviation
 const FIPS_TO_STATE: Record<string, { name: string; abbr: string }> = {
   "01": { name: "Alabama", abbr: "AL" },
   "02": { name: "Alaska", abbr: "AK" },
@@ -61,97 +60,238 @@ const FIPS_TO_STATE: Record<string, { name: string; abbr: string }> = {
   "56": { name: "Wyoming", abbr: "WY" },
 };
 
+interface DistrictPlan {
+  state_fips: string;
+  assignment: Record<string, number>;
+}
+
 const WIDTH = 960;
 const HEIGHT = 600;
+const POLL_MS = 3500;
+const DEFAULT_FILL = "#1e3461";
+const HOVER_FILL = "#4f46e5";
+
+/** Pure D3 helper — updates only fill/stroke attrs, never touches geometry. No flicker. */
+function applyPlanColors(
+  svg: d3.Selection<SVGSVGElement | null, unknown, null, undefined>,
+  plans: Record<string, DistrictPlan>,
+  districtColor: d3.ScaleOrdinal<string, string>,
+) {
+  const optimizedFips = new Set(Object.values(plans).map((p) => p.state_fips));
+  const countyDistrict: Record<string, number> = {};
+  for (const plan of Object.values(plans)) {
+    for (const [fips, distId] of Object.entries(plan.assignment)) {
+      countyDistrict[fips] = distId;
+    }
+  }
+
+  svg
+    .selectAll<SVGPathElement, GeoJSON.Feature>("path.state-fill")
+    .attr("fill", (d) =>
+      optimizedFips.has(String(d.id).padStart(2, "0")) ? "none" : DEFAULT_FILL,
+    );
+
+  svg
+    .selectAll<SVGPathElement, GeoJSON.Feature>("path.county-fill")
+    .attr("fill", (d) => {
+      const countyFips = String(d.id).padStart(5, "0");
+      const stateFips = countyFips.slice(0, 2);
+      if (!optimizedFips.has(stateFips)) return "none";
+      const distId = countyDistrict[countyFips];
+      return distId !== undefined ? districtColor(String(distId)) : "#374151";
+    })
+    .attr("stroke", (d) => {
+      const stateFips = String(d.id).padStart(5, "0").slice(0, 2);
+      return optimizedFips.has(stateFips) ? "rgba(255,255,255,0.35)" : "none";
+    });
+}
 
 export default function USMap() {
   const svgRef = useRef<SVGSVGElement>(null);
   const router = useRouter();
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; name: string } | null>(null);
-  const [hovered, setHovered] = useState<string | null>(null);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; label: string } | null>(null);
+  const [plans, setPlans] = useState<Record<string, DistrictPlan>>({});
+
+  const districtColor = useMemo(() => d3.scaleOrdinal(d3.schemeTableau10), []);
+
+  // Keep a ref so hover handlers always see fresh plans without triggering redraws
+  const plansRef = useRef<Record<string, DistrictPlan>>({});
+  const structureReadyRef = useRef(false);
 
   useEffect(() => {
+    plansRef.current = plans;
+  }, [plans]);
+
+  // ── Poll with deep-equal guard (prevents needless re-renders when data hasn't changed) ──
+  useEffect(() => {
+    const load = () =>
+      fetch("http://localhost:8000/api/agent/all-plans", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data)
+            setPlans((prev) =>
+              JSON.stringify(prev) === JSON.stringify(data) ? prev : data,
+            );
+        })
+        .catch(() => {});
+    load();
+    const t = setInterval(load, POLL_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  // ── EFFECT 1: Draw SVG geometry ONCE. Never re-runs on plan changes. ──────────
+  useEffect(() => {
+    structureReadyRef.current = false;
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
     const projection = d3.geoAlbersUsa().scale(1300).translate([WIDTH / 2, HEIGHT / 2]);
-    const pathGen = d3.geoPath().projection(projection);
-
-    // Border mesh layer
+    const path = d3.geoPath().projection(projection);
     const g = svg.append("g");
 
-    fetch("/us-states-10m.json")
-      .then((r) => r.json())
-      .then((topo: Topology) => {
-        const states = topojson.feature(
-          topo,
-          topo.objects.states as GeometryCollection
-        );
+    Promise.all([
+      fetch("/us-states-10m.json").then((r) => r.json()),
+      fetch("/counties-10m.json").then((r) => r.json()),
+    ]).then(([stateTopo, countyTopo]: [Topology, Topology]) => {
+      const stateFeatures = (
+        topojson.feature(
+          stateTopo,
+          stateTopo.objects.states as GeometryCollection,
+        ) as GeoJSON.FeatureCollection
+      ).features;
 
-        // State fills
-        g.selectAll<SVGPathElement, GeoJSON.Feature>("path.state")
-          .data((states as GeoJSON.FeatureCollection).features)
-          .join("path")
-          .attr("class", "state")
-          .attr("d", pathGen as never)
-          .attr("fill", (d) => {
-            const fips = String(d.id).padStart(2, "0");
-            return hovered === fips ? "#4f86f7" : "#c8d8f0";
-          })
-          .attr("stroke", "#fff")
-          .attr("stroke-width", 0.8)
-          .style("cursor", "pointer")
-          .on("mouseenter", function (event: MouseEvent, d) {
-            const fips = String(d.id).padStart(2, "0");
-            const info = FIPS_TO_STATE[fips];
-            d3.select(this).attr("fill", "#4f86f7");
-            setHovered(fips);
-            setTooltip({ x: event.offsetX, y: event.offsetY, name: info?.name ?? fips });
-          })
-          .on("mousemove", function (event: MouseEvent) {
-            setTooltip((t) => t ? { ...t, x: event.offsetX, y: event.offsetY } : null);
-          })
-          .on("mouseleave", function () {
-            d3.select(this).attr("fill", "#c8d8f0");
-            setHovered(null);
-            setTooltip(null);
-          })
-          .on("click", (_event, d) => {
-            const fips = String(d.id).padStart(2, "0");
-            const info = FIPS_TO_STATE[fips];
-            if (info) router.push(`/map/${info.abbr.toLowerCase()}`);
-          });
+      const countyFeatures = (
+        topojson.feature(
+          countyTopo,
+          countyTopo.objects.counties as GeometryCollection,
+        ) as GeoJSON.FeatureCollection
+      ).features;
 
-        // State border mesh
-        g.append("path")
-          .datum(topojson.mesh(topo, topo.objects.states as GeometryCollection, (a, b) => a !== b))
-          .attr("fill", "none")
-          .attr("stroke", "#fff")
-          .attr("stroke-width", 0.5)
-          .attr("d", pathGen as never);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      // Layer 1 — state base fills (default navy; "none" for optimized states)
+      g.selectAll<SVGPathElement, GeoJSON.Feature>("path.state-fill")
+        .data(stateFeatures)
+        .join("path")
+        .attr("class", "state-fill")
+        .attr("d", path as never)
+        .attr("fill", DEFAULT_FILL)
+        .attr("stroke", "none");
+
+      // Layer 2 — county fills (starts invisible; applyPlanColors sets colors)
+      g.selectAll<SVGPathElement, GeoJSON.Feature>("path.county-fill")
+        .data(countyFeatures)
+        .join("path")
+        .attr("class", "county-fill")
+        .attr("d", path as never)
+        .attr("fill", "none")
+        .attr("stroke", "none")
+        .attr("stroke-width", 0.3)
+        .attr("pointer-events", "none");
+
+      // Layer 3 — invisible hit areas for hover + click
+      g.selectAll<SVGPathElement, GeoJSON.Feature>("path.state-hit")
+        .data(stateFeatures)
+        .join("path")
+        .attr("class", "state-hit")
+        .attr("d", path as never)
+        .attr("fill", "transparent")
+        .attr("stroke", "none")
+        .style("cursor", "pointer")
+        .on("mouseenter", function (event: MouseEvent, d) {
+          const fips = String(d.id).padStart(2, "0");
+          const info = FIPS_TO_STATE[fips];
+          const isOptimized = new Set(
+            Object.values(plansRef.current).map((p) => p.state_fips),
+          ).has(fips);
+          const label = info
+            ? `${info.name}${isOptimized ? " ✓ optimized" : ""}`
+            : fips;
+          setTooltip({ x: event.offsetX, y: event.offsetY, label });
+          if (!isOptimized) {
+            svg
+              .selectAll<SVGPathElement, GeoJSON.Feature>("path.state-fill")
+              .filter((fd) => String(fd.id).padStart(2, "0") === fips)
+              .attr("fill", HOVER_FILL);
+          }
+        })
+        .on("mousemove", (event: MouseEvent) => {
+          setTooltip((t) => (t ? { ...t, x: event.offsetX, y: event.offsetY } : null));
+        })
+        .on("mouseleave", function (_event, d) {
+          const fips = String(d.id).padStart(2, "0");
+          setTooltip(null);
+          const isOptimized = new Set(
+            Object.values(plansRef.current).map((p) => p.state_fips),
+          ).has(fips);
+          if (!isOptimized) {
+            svg
+              .selectAll<SVGPathElement, GeoJSON.Feature>("path.state-fill")
+              .filter((fd) => String(fd.id).padStart(2, "0") === fips)
+              .attr("fill", DEFAULT_FILL);
+          }
+        })
+        .on("click", (_event, d) => {
+          const fips = String(d.id).padStart(2, "0");
+          const info = FIPS_TO_STATE[fips];
+          if (info) router.push(`/map/${info.abbr.toLowerCase()}`);
+        });
+
+      // Layer 4 — state border mesh (always on top)
+      g.append("path")
+        .datum(
+          topojson.mesh(
+            stateTopo,
+            stateTopo.objects.states as GeometryCollection,
+            (a, b) => a !== b,
+          ),
+        )
+        .attr("fill", "none")
+        .attr("stroke", "rgba(255,255,255,0.18)")
+        .attr("stroke-width", 0.7)
+        .attr("pointer-events", "none")
+        .attr("d", path as never);
+
+      structureReadyRef.current = true;
+      // Apply whatever plans were already loaded before geometry finished
+      applyPlanColors(svg, plansRef.current, districtColor);
+    });
+  }, [districtColor, router]); // ← deliberately excludes `plans`
+
+  // ── EFFECT 2: Update colors only — no geometry removal, no flicker ────────────
+  useEffect(() => {
+    if (!structureReadyRef.current) return;
+    applyPlanColors(d3.select(svgRef.current), plans, districtColor);
+  }, [plans, districtColor]);
+
+  const optimizedCount = Object.keys(plans).length;
 
   return (
-    <div className="relative w-full max-w-4xl">
+    <div className="relative w-full max-w-5xl">
       <svg
         ref={svgRef}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="w-full h-auto rounded-xl border border-border bg-slate-50"
+        className="w-full h-auto rounded-2xl border border-white/10 bg-slate-900/60"
         aria-label="Interactive US map — click a state to explore"
       />
+
       {tooltip && (
         <div
-          className="pointer-events-none absolute z-10 rounded-md bg-popover border border-border px-2.5 py-1 text-xs font-medium shadow-md text-popover-foreground"
+          className="pointer-events-none absolute z-10 rounded-md bg-slate-800 border border-white/15 px-2.5 py-1 text-xs font-medium shadow-lg text-white/90"
           style={{ left: tooltip.x + 12, top: tooltip.y - 8 }}
         >
-          {tooltip.name}
+          {tooltip.label}
         </div>
       )}
-      <p className="mt-2 text-center text-xs text-muted-foreground">
-        Click any state to explore its redistricting simulation
-      </p>
+
+      <div className="mt-3 flex items-center justify-between px-1">
+        <p className="text-xs text-white/35">
+          Click any state to explore · run the optimizer to see district colors
+        </p>
+        {optimizedCount > 0 && (
+          <p className="text-xs font-medium text-indigo-400">
+            {optimizedCount} state{optimizedCount > 1 ? "s" : ""} optimized
+          </p>
+        )}
+      </div>
     </div>
   );
 }

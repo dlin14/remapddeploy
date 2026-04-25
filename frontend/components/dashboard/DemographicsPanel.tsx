@@ -26,10 +26,10 @@ function RaceBar({ label, pct, color }: { label: string; pct: number; color: str
   return (
     <div className="space-y-0.5">
       <div className="flex justify-between text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-mono font-medium">{pct.toFixed(1)}%</span>
+        <span className="text-white/50">{label}</span>
+        <span className="font-mono font-medium text-white/80">{pct.toFixed(1)}%</span>
       </div>
-      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+      <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
         <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
       </div>
     </div>
@@ -38,11 +38,11 @@ function RaceBar({ label, pct, color }: { label: string; pct: number; color: str
 
 function StatCard({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-border p-2.5 bg-background">
-      <Icon size={14} className="mt-0.5 text-muted-foreground shrink-0" />
+    <div className="flex items-start gap-2 rounded-lg border border-white/10 p-2.5 bg-white/5">
+      <Icon size={14} className="mt-0.5 text-white/40 shrink-0" />
       <div>
-        <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>
-        <p className="text-sm font-semibold leading-tight">{value}</p>
+        <p className="text-[10px] text-white/40 leading-tight">{label}</p>
+        <p className="text-sm font-semibold leading-tight text-white/90">{value}</p>
       </div>
     </div>
   );
@@ -68,18 +68,18 @@ export default function DemographicsPanel({ stateAbbr }: DemographicsPanelProps)
   if (loading) return (
     <div className="space-y-2">
       {[...Array(6)].map((_, i) => (
-        <div key={i} className="h-8 rounded bg-muted animate-pulse" />
+        <div key={i} className="h-8 rounded bg-white/5 animate-pulse" />
       ))}
     </div>
   );
 
   if (error) return (
-    <div className="flex items-start gap-2 text-xs text-destructive p-3 rounded-lg border border-destructive/30 bg-destructive/5">
+    <div className="flex items-start gap-2 text-xs text-red-400 p-3 rounded-lg border border-red-500/20 bg-red-500/10">
       <AlertCircle size={14} className="mt-0.5 shrink-0" />
       <div>
         <p className="font-medium">Could not load Census data</p>
-        <p className="text-muted-foreground mt-0.5">Add CENSUS_API_KEY to backend/.env</p>
-        <p className="text-muted-foreground mt-0.5 font-mono">{error}</p>
+        <p className="text-white/40 mt-0.5">Add CENSUS_API_KEY to backend/.env</p>
+        <p className="text-white/30 mt-0.5 font-mono">{error}</p>
       </div>
     </div>
   );
@@ -91,7 +91,7 @@ export default function DemographicsPanel({ stateAbbr }: DemographicsPanelProps)
   return (
     <div className="space-y-4">
       {noKey && (
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        <div className="text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
           No Census API key set — showing empty data. Add <code className="font-mono">CENSUS_API_KEY</code> to <code className="font-mono">backend/.env</code>.
         </div>
       )}
@@ -106,14 +106,14 @@ export default function DemographicsPanel({ stateAbbr }: DemographicsPanelProps)
 
       {/* Median age */}
       {data.median_age > 0 && (
-        <div className="text-xs text-muted-foreground">
-          Median age: <span className="font-semibold text-foreground">{data.median_age}</span>
+        <div className="text-xs text-white/40">
+          Median age: <span className="font-semibold text-white/80">{data.median_age}</span>
         </div>
       )}
 
       {/* Race / ethnicity breakdown */}
       <div>
-        <p className="text-xs font-medium mb-2">Racial / Ethnic Composition</p>
+        <p className="text-xs font-medium mb-2 text-white/70">Racial / Ethnic Composition</p>
         <div className="space-y-2">
           <RaceBar label="White" pct={data.white_pct} color="#6366f1" />
           <RaceBar label="Hispanic / Latino" pct={data.hispanic_pct} color="#f59e0b" />
@@ -123,7 +123,7 @@ export default function DemographicsPanel({ stateAbbr }: DemographicsPanelProps)
         </div>
       </div>
 
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-[10px] text-white/25">
         Source: US Census Bureau ACS 5-Year Estimates (2022)
       </p>
     </div>

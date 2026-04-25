@@ -20,20 +20,38 @@ interface DistrictPlan {
   }>;
 }
 
+const W = 700;
+const H = 500;
+
 export default function StateMap({ stateFips, stateName }: StateMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [plan, setPlan] = useState<DistrictPlan | null>(null);
 
+  const districtColor = useMemo(() => d3.scaleOrdinal(d3.schemeTableau10), []);
+
+  // Keep a ref so color-update effect always has fresh data
+  const planRef = useRef<DistrictPlan | null>(null);
+  const structureReadyRef = useRef(false);
+
+  useEffect(() => {
+    planRef.current = plan;
+  }, [plan]);
+
+  // ── Poll with deep-equal guard ────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     const loadPlan = async () => {
       try {
-        const resp = await fetch(`http://localhost:8000/api/states/${stateFips}/district-plan`, {
-          cache: "no-store",
-        });
+        const resp = await fetch(
+          `http://localhost:8000/api/states/${stateFips}/district-plan`,
+          { cache: "no-store" },
+        );
         if (!resp.ok) return;
         const data = (await resp.json()) as DistrictPlan;
-        if (!cancelled) setPlan(data);
+        if (!cancelled)
+          setPlan((prev) =>
+            JSON.stringify(prev) === JSON.stringify(data) ? prev : data,
+          );
       } catch {
         // Keep static map if API is unavailable.
       }
@@ -46,127 +64,134 @@ export default function StateMap({ stateFips, stateName }: StateMapProps) {
     };
   }, [stateFips]);
 
-  const districtColor = useMemo(() => d3.scaleOrdinal(d3.schemeTableau10), []);
-
+  // ── EFFECT 1: Draw SVG geometry ONCE ─────────────────────────────────────────
   useEffect(() => {
+    structureReadyRef.current = false;
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
-
-    const W = 700, H = 500;
 
     Promise.all([
       fetch("/us-states-10m.json").then((r) => r.json()),
       fetch("/counties-10m.json").then((r) => r.json()),
     ]).then(([stateTopo, countyTopo]: [Topology, Topology]) => {
-      // Extract this state's GeoJSON feature
       const allStates = topojson.feature(
         stateTopo,
-        stateTopo.objects.states as GeometryCollection
+        stateTopo.objects.states as GeometryCollection,
       ) as GeoJSON.FeatureCollection;
 
       const stateFeature = allStates.features.find(
-        (f) => String(f.id).padStart(2, "0") === stateFips
+        (f) => String(f.id).padStart(2, "0") === stateFips,
       );
       if (!stateFeature) return;
 
-      // Fit projection to this state's bounds
       const projection = d3.geoMercator().fitSize([W - 40, H - 40], stateFeature);
       const path = d3.geoPath().projection(projection);
-
       const g = svg.append("g").attr("transform", "translate(20,20)");
 
-      // State fill
+      // State background
       g.append("path")
         .datum(stateFeature)
         .attr("d", path as never)
-        .attr("fill", "#dbeafe")
-        .attr("stroke", "#3b82f6")
+        .attr("fill", "#0f172a")
+        .attr("stroke", "rgba(99,102,241,0.4)")
         .attr("stroke-width", 1.5);
 
-      // County borders within state (FIPS: county is 5-digit, starts with state 2-digit)
       const allCounties = topojson.feature(
         countyTopo,
-        countyTopo.objects.counties as GeometryCollection
+        countyTopo.objects.counties as GeometryCollection,
       ) as GeoJSON.FeatureCollection;
 
       const stateCounties = allCounties.features.filter((f) =>
-        String(f.id).padStart(5, "0").startsWith(stateFips)
+        String(f.id).padStart(5, "0").startsWith(stateFips),
       );
 
+      // County fills (colored by district; starts grey)
       g.selectAll<SVGPathElement, GeoJSON.Feature>("path.county")
         .data(stateCounties)
         .join("path")
         .attr("class", "county")
         .attr("d", path as never)
-        .attr("fill", (f) => {
-          const countyId = String(f.id).padStart(5, "0");
-          const districtId = plan?.assignment?.[countyId];
-          return districtId === undefined ? "#e5e7eb" : districtColor(String(districtId));
-        })
+        .attr("fill", "#1e293b")
         .attr("fill-opacity", 0.9)
-        .attr("stroke", "#6366f1")
+        .attr("stroke", "rgba(99,102,241,0.25)")
         .attr("stroke-width", 0.4);
 
-      // County mesh (internal borders only)
+      // County internal mesh
       const countyMesh = topojson.mesh(
         countyTopo,
         countyTopo.objects.counties as GeometryCollection,
         (a, b) =>
           a !== b &&
           String(a.id).padStart(5, "0").startsWith(stateFips) &&
-          String(b.id).padStart(5, "0").startsWith(stateFips)
+          String(b.id).padStart(5, "0").startsWith(stateFips),
       );
-
       g.append("path")
         .datum(countyMesh)
         .attr("fill", "none")
-        .attr("stroke", "#6366f1")
+        .attr("stroke", "rgba(99,102,241,0.3)")
         .attr("stroke-width", 0.5)
         .attr("d", path as never);
 
-      // Label
+      // Caption
       g.append("text")
         .attr("x", (W - 40) / 2)
         .attr("y", H - 55)
         .attr("text-anchor", "middle")
-        .attr("font-size", 11)
-        .attr("fill", "#6b7280")
-        .text("Counties colored by district assignment (latest optimizer run)");
+        .attr("font-size", 10)
+        .attr("fill", "rgba(255,255,255,0.25)")
+        .text("Counties colored by district assignment");
 
-      if (plan?.district_metrics?.length) {
-        const legend = g.append("g").attr("transform", "translate(10,10)");
-        plan.district_metrics.slice(0, 10).forEach((d, i) => {
-          legend
-            .append("rect")
-            .attr("x", 0)
-            .attr("y", i * 16)
-            .attr("width", 10)
-            .attr("height", 10)
-            .attr("fill", districtColor(String(d.district_id)));
-          legend
-            .append("text")
-            .attr("x", 14)
-            .attr("y", i * 16 + 9)
-            .attr("font-size", 10)
-            .attr("fill", "#374151")
-            .text(`D${d.district_id + 1} · pop ${d.population.toLocaleString()}`);
-        });
-      }
+      structureReadyRef.current = true;
+      // Apply whatever plan was already loaded
+      applyCountyColors(svg, planRef.current, districtColor);
     });
-  }, [districtColor, plan, stateFips]);
+  }, [districtColor, stateFips]); // ← excludes `plan`
+
+  // ── EFFECT 2: Update county fill colors only — no geometry removal ────────────
+  useEffect(() => {
+    if (!structureReadyRef.current) return;
+    applyCountyColors(d3.select(svgRef.current), plan, districtColor);
+  }, [plan, districtColor]);
 
   return (
-    <div className="w-full rounded-xl border border-border overflow-hidden bg-white">
-      <div className="px-4 py-2 border-b border-border bg-muted/40 flex items-center justify-between">
-        <span className="text-sm font-semibold">{stateName} — Geographic Overview</span>
-        <span className="text-xs text-muted-foreground">County divisions · Click to select</span>
+    <div className="w-full rounded-xl border border-white/10 overflow-hidden bg-slate-900">
+      <div className="px-4 py-2.5 border-b border-white/10 bg-slate-800/60 flex items-center justify-between">
+        <span className="text-sm font-semibold text-white/90">{stateName} — District Map</span>
+        <span className="text-xs text-white/35">County divisions · optimizer assigns colors</span>
       </div>
       <svg
         ref={svgRef}
-        viewBox="0 0 700 500"
+        viewBox={`0 0 ${W} ${H}`}
         className="w-full h-auto"
         aria-label={`Map of ${stateName}`}
       />
+      {plan?.district_metrics?.length ? (
+        <div className="px-4 py-3 border-t border-white/10 flex flex-wrap gap-2">
+          {plan.district_metrics.slice(0, 10).map((d) => (
+            <div key={d.district_id} className="flex items-center gap-1.5">
+              <span
+                className="inline-block w-2.5 h-2.5 rounded-sm"
+                style={{ backgroundColor: districtColor(String(d.district_id)) }}
+              />
+              <span className="text-[10px] text-white/50 font-mono">
+                D{d.district_id + 1} · {d.population.toLocaleString()}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function applyCountyColors(
+  svg: d3.Selection<SVGSVGElement | null, unknown, null, undefined>,
+  plan: DistrictPlan | null,
+  districtColor: d3.ScaleOrdinal<string, string>,
+) {
+  svg.selectAll<SVGPathElement, GeoJSON.Feature>("path.county").attr("fill", (f) => {
+    const countyId = String(f.id).padStart(5, "0");
+    const districtId = plan?.assignment?.[countyId];
+    return districtId === undefined ? "#1e293b" : districtColor(String(districtId));
+  });
 }

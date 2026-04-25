@@ -156,14 +156,29 @@ async def get_demographics(state_abbr: str):
 
 @router.get("/{state_abbr}/district-plan")
 async def get_district_plan(state_abbr: str):
+    from models.agent.rl_agent import RLAgent
+
     token = state_abbr.upper()
-    normalized = FIPS_TO_ABBR.get(token, token)
-    plan = get_plan(normalized)
-    if not plan:
-        return {
-            "state_abbr": normalized,
-            "state_fips": ABBR_TO_FIPS.get(normalized, token if token.isdigit() else ""),
-            "assignment": {},
-            "district_metrics": [],
-        }
-    return plan
+    # Accept both 2-letter abbr ("CA") and 2-digit FIPS ("06")
+    if token.isdigit():
+        normalized = FIPS_TO_ABBR.get(token, token)
+        fips = token.zfill(2)
+    else:
+        normalized = token
+        fips = ABBR_TO_FIPS.get(normalized, "")
+
+    if not fips:
+        raise HTTPException(status_code=404, detail=f"Unknown state: {state_abbr}")
+
+    # Return cached optimized plan if one exists
+    cached = get_plan(normalized)
+    if cached:
+        return cached
+
+    # No run yet — generate default round-robin plan so the map shows colors immediately
+    try:
+        plan = RLAgent.default_plan(state_fips=fips, n_districts=5)
+        plan["state_abbr"] = normalized
+        return plan
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
