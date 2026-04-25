@@ -99,13 +99,24 @@ async def get_demographics(state_abbr: str):
         "key": settings.CENSUS_API_KEY,
     }
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
         resp = await client.get(url, params=params)
 
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Census API error: {resp.text[:200]}")
+    # Census API redirects to an HTML error page on bad key/params — treat as error
+    content_type = resp.headers.get("content-type", "")
+    if resp.status_code not in (200, 201) or "html" in content_type:
+        detail = f"Census API returned {resp.status_code}. "
+        if "html" in content_type:
+            detail += "Key may be invalid or not yet activated (can take up to 1 hour after signup)."
+        else:
+            detail += resp.text[:200]
+        raise HTTPException(status_code=502, detail=detail)
 
-    rows = resp.json()
+    try:
+        rows = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail=f"Census API returned non-JSON: {resp.text[:200]}")
+
     if len(rows) < 2:
         raise HTTPException(status_code=502, detail="No data returned from Census API")
 
