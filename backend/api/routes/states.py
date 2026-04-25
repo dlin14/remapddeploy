@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from core.config import settings
+from services.optimizer_store import get_plan
 
 router = APIRouter(prefix="/api/states", tags=["states"])
 
@@ -37,6 +38,7 @@ ABBR_TO_FIPS: dict[str, str] = {
     "VT": "50", "VA": "51", "WA": "53", "WV": "54", "WI": "55",
     "WY": "56",
 }
+FIPS_TO_ABBR: dict[str, str] = {fips: abbr for abbr, fips in ABBR_TO_FIPS.items()}
 
 
 class Demographics(BaseModel):
@@ -150,3 +152,18 @@ async def get_demographics(state_abbr: str):
         poverty_rate=round(pov_below / pov_total * 100, 1),
         median_age=_safe_float(row.get("B01002_001E", 0)),
     )
+
+
+@router.get("/{state_abbr}/district-plan")
+async def get_district_plan(state_abbr: str):
+    token = state_abbr.upper()
+    normalized = FIPS_TO_ABBR.get(token, token)
+    plan = get_plan(normalized)
+    if not plan:
+        return {
+            "state_abbr": normalized,
+            "state_fips": ABBR_TO_FIPS.get(normalized, token if token.isdigit() else ""),
+            "assignment": {},
+            "district_metrics": [],
+        }
+    return plan

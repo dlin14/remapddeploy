@@ -21,7 +21,7 @@ duckdb==1.2.2
 httpx==0.28.1
 requests==2.32.3
 pandas==2.2.3
-numpy==2.2.5
+numpy==2.0.2
 
 # Census / Gov data
 census==0.8.22         # Python wrapper for US Census Bureau API

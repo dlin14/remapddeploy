@@ -173,3 +173,284 @@ Get a free Census API key at https://api.census.gov/data/key_signup.html
 **LangGraph fan-out** — Legal, demographic, and equity checks run in parallel graph nodes and fan back into a synthesis node, keeping latency low while maintaining explainability.
 
 **DuckDB** — In-process analytical database lets the backend run fast GROUP BY / spatial queries on census block data without a separate DB server.
+
+---
+
+## Technical Reimplementation Guide (Hackathon Optimizer MVP)
+
+This section is a low-level implementation spec for reproducing the current county-level district optimizer and UI integration.
+
+### 1) Problem Formulation
+
+#### 1.1 Atomic units
+- Geographic atomic unit for this MVP is **county** (5-digit county FIPS), not census block.
+- A districting plan is represented as a label assignment:
+  - `assignment: Dict[county_fips, district_id]`
+  - `district_id in [0, n_districts-1]`
+
+#### 1.2 Optimization objective
+Maximize weighted reward:
+
+\[
+R = w_r S_r + w_p S_p + w_c S_c + w_v S_v
+\]
+
+Where:
+- `S_r`: racial fairness proxy
+- `S_p`: population equality
+- `S_c`: compactness proxy
+- `S_v`: voting-rights proxy
+- weights from runtime request (`racial_weight`, `population_weight`, `compactness_weight`, `vra_weight`)
+
+All sub-scores are normalized/clamped to `[0, 1]`.
+
+### 2) Runtime Data Model
+
+#### 2.1 County feature table (in-memory)
+For each county:
+- `county_fips: str`
+- `population: float`
+- `minority_share: float` in `[0,1]`
+
+Current implementation uses deterministic pseudo-features per county FIPS seed for reliability under hackathon constraints.
+
+#### 2.2 District aggregate model (derived each iteration)
+For each district:
+- `district_id: int`
+- `num_counties: int`
+- `population: int`
+- `minority_share: float`
+
+#### 2.3 Global cached outputs
+- Latest metrics payload for dashboard polling:
+  - `episode` (iteration count)
+  - `reward` (history array)
+  - `entropy` (exploration-rate history array)
+  - `socialImpactScores` (latest component scores)
+- Latest district plan per state:
+  - `state_abbr`
+  - `state_fips`
+  - `assignment`
+  - `district_metrics`
+
+### 3) Geography Ingestion
+
+#### 3.1 Source file
+- TopoJSON from frontend static asset:
+  - `frontend/public/counties-10m.json`
+
+#### 3.2 State county extraction
+1. Load TopoJSON.
+2. Enumerate `objects.counties.geometries`.
+3. Normalize county IDs to zero-padded 5-char strings.
+4. Filter by prefix match on 2-char `state_fips`.
+
+### 4) Optimizer Algorithm
+
+Implementation file: `backend/models/agent/rl_agent.py` (class name retained as `RLAgent` for compatibility).
+
+#### 4.1 Initialization
+1. Extract all counties for state.
+2. Build county features.
+3. Compute:
+   - `target_pop = total_pop / n_districts`
+   - `state_minority_share = mean(county_minority_share)`
+4. Build initial assignment by round-robin county index:
+   - `assignment[county_i] = i % n_districts`
+
+#### 4.2 Single action definition
+Action is a local reassignment:
+- pick one county `c`
+- move from `old_district` to `new_district` (`new_district != old_district`)
+
+No polygon coordinate editing is performed; district geometry is emergent from county color classes.
+
+#### 4.3 Move acceptance (simulated annealing style)
+Given current reward `R_cur` and proposed reward `R_new`:
+- if `R_new >= R_cur`, accept
+- else with probability `exploration_rate`, try probabilistic uphill escape:
+  \[
+  P(\text{accept}) = \exp\left(\frac{R_{new}-R_{cur}}{T}\right)
+  \]
+- decay temperature each iteration:
+  - `T = T * cooling_rate`
+
+#### 4.4 Iteration loop
+For `iterations` steps:
+1. Propose random county reassignment.
+2. Compute proposal reward.
+3. Apply acceptance rule.
+4. Track best-so-far assignment and reward.
+5. Append metrics:
+   - `reward_history`
+   - `exploration_history`
+
+Return best plan + histories.
+
+### 5) Reward Components (Exact Proxies)
+
+Let district metrics produce arrays:
+- `district_pops`
+- `district_shares` (minority share per district)
+- `district_sizes` (counties per district)
+
+#### 5.1 Population equality `S_p`
+\[
+\delta_d = \frac{|pop_d - target\_pop|}{target\_pop}
+\]
+\[
+S_p = clamp(1 - mean(\delta_d), 0, 1)
+\]
+
+#### 5.2 Racial fairness `S_r`
+\[
+gap = mean(|district\_share_d - state\_minority\_share|)
+\]
+\[
+S_r = clamp(1 - 2 \cdot gap, 0, 1)
+\]
+
+#### 5.3 Compactness proxy `S_c`
+Uses district county-count balance as a cheap compactness surrogate:
+\[
+S_c = clamp\left(1 - \frac{std(district\_sizes)}{mean(district\_sizes)}, 0, 1\right)
+\]
+
+#### 5.4 Voting-rights proxy `S_v`
+Opportunity district threshold set to minority share `>= 0.45`:
+- `opportunity_count = count(district_share >= 0.45)`
+- `target_opportunity = max(1, round(n_districts * state_minority_share))`
+\[
+S_v = clamp\left(\frac{opportunity\_count}{target\_opportunity}, 0, 1\right)
+\]
+
+#### 5.5 Total reward
+\[
+R = w_r S_r + w_p S_p + w_c S_c + w_v S_v
+\]
+
+### 6) Backend API Contract
+
+#### 6.1 `POST /api/agent/run`
+Body:
+```json
+{
+  "state_abbr": "CA",
+  "n_districts": 8,
+  "n_steps": 700,
+  "racial_weight": 0.35,
+  "population_weight": 0.30,
+  "compactness_weight": 0.20,
+  "vra_weight": 0.15,
+  "ent_coef": 0.25
+}
+```
+
+Semantics:
+- `n_steps` -> iteration budget
+- `ent_coef` -> exploration rate
+
+Response:
+```json
+{
+  "status": "ok",
+  "state_abbr": "CA",
+  "state_fips": "06",
+  "best_reward": 0.7421,
+  "iterations": 700
+}
+```
+
+#### 6.2 `GET /api/agent/metrics`
+Returns latest dashboard metrics:
+```json
+{
+  "episode": 700,
+  "reward": [0.61, 0.62, "..."],
+  "entropy": [0.25, 0.25, "..."],
+  "socialImpactScores": {
+    "racial_fairness": 0.71,
+    "population_equality": 0.76,
+    "compactness": 0.67,
+    "voting_rights": 0.83
+  }
+}
+```
+
+#### 6.3 `GET /api/states/{state_abbr_or_fips}/district-plan`
+Supports either 2-letter state abbreviation or 2-digit FIPS route token.
+Response:
+```json
+{
+  "state_abbr": "CA",
+  "state_fips": "06",
+  "assignment": {
+    "06001": 0,
+    "06003": 1
+  },
+  "district_metrics": [
+    {
+      "district_id": 0,
+      "num_counties": 8,
+      "population": 3200000,
+      "minority_share": 0.54
+    }
+  ]
+}
+```
+
+### 7) Frontend Integration Contract
+
+#### 7.1 Run control (`RLParamsSliders`)
+- Sends slider values to `POST /api/agent/run`.
+- Displays completion text with iteration count and best reward.
+
+#### 7.2 Metrics panel (`RLMetricsPanel`)
+- Poll interval: ~2500 ms.
+- Endpoint: `GET /api/agent/metrics`.
+- Renders current reward, exploration rate, and component scores.
+
+#### 7.3 State map (`StateMap`)
+- Poll interval: ~3000 ms.
+- Endpoint: `GET /api/states/{state_fips}/district-plan`.
+- County fill color keyed by `assignment[county_fips]`.
+- Legend generated from `district_metrics`.
+
+### 8) Determinism and Reproducibility
+
+- County pseudo-features are deterministic per county FIPS seed.
+- The search trajectory is stochastic unless you set a fixed global RNG seed.
+- To make runs reproducible, inject a configurable seed and initialize `numpy` RNG once per run.
+
+### 9) Complexity Characteristics
+
+Let:
+- `N = # counties in state`
+- `K = n_districts`
+- `I = iterations`
+
+Per iteration:
+- recompute district metrics currently scans `N` counties
+- complexity approx `O(N)` per move
+- total `O(I * N)` time, `O(N + K)` memory
+
+For hackathon state sizes (county-level), this is practical in seconds.
+
+### 10) Upgrade Path (Post-Hackathon)
+
+1. Replace pseudo county features with real county/block aggregates from Census + TIGER joins.
+2. Add adjacency-aware compactness and explicit contiguity penalties.
+3. Add hard constraints (reject moves that violate contiguity/pop bounds).
+4. Swap optimizer module behind same API contract:
+   - simulated annealing -> PPO/SAC/A2C/GNN policy.
+5. Introduce background job execution and websocket streaming for long runs.
+
+### 11) Minimal Reimplementation Checklist
+
+If another engineer re-implements from scratch, they must preserve:
+- assignment-based district representation (county -> district label),
+- weighted reward interface with the same 4 components,
+- run endpoint returning quick completion metadata,
+- metrics endpoint returning history arrays and score breakdown,
+- district-plan endpoint returning assignment + district aggregates,
+- frontend polling + county recolor behavior.

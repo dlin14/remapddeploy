@@ -62,10 +62,24 @@ interface RLParamsSlidersProps {
   stateAbbr: string;
 }
 
+interface RunResponse {
+  iterations?: number;
+  best_reward?: number;
+  baseline_reward?: number;
+  improvement?: {
+    total_reward_delta: number;
+    total_reward_pct_vs_baseline: number | null;
+    components: Record<string, { delta: number; pct_vs_baseline: number | null }>;
+  };
+  baseline_score_breakdown?: Record<string, number>;
+  score_breakdown?: Record<string, number>;
+}
+
 export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
   const [params, setParams] = useState<RLParams>(DEFAULTS);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [lastRun, setLastRun] = useState<RunResponse | null>(null);
 
   const set = useCallback(<K extends keyof RLParams>(key: K, val: RLParams[K]) => {
     setParams((p) => ({ ...p, [key]: val }));
@@ -78,7 +92,7 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
 
   const handleRun = async () => {
     setRunning(true);
-    setStatus("Starting agent...");
+    setStatus("Starting optimizer...");
     try {
       const resp = await fetch("http://localhost:8000/api/agent/run", {
         method: "POST",
@@ -86,9 +100,13 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
         body: JSON.stringify({ state_abbr: stateAbbr, ...params }),
       });
       if (!resp.ok) throw new Error(`${resp.status}`);
-      setStatus("Agent running — check metrics panel");
+      const payload = (await resp.json()) as RunResponse;
+      setLastRun(payload);
+      setStatus(
+        `Optimization complete in ${payload.iterations ?? 0} iterations (best reward ${payload.best_reward ?? "n/a"})`
+      );
     } catch {
-      setStatus("Backend endpoint not yet implemented — scaffold complete");
+      setStatus("Could not reach backend optimizer. Check API server on port 8000.");
     } finally {
       setRunning(false);
     }
@@ -185,10 +203,14 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
           className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium py-2 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
         >
           <Play size={12} />
-          {running ? "Running…" : "Run Agent"}
+          {running ? "Running…" : "Run Optimizer"}
         </button>
         <button
-          onClick={() => { setParams(DEFAULTS); setStatus(null); }}
+          onClick={() => {
+            setParams(DEFAULTS);
+            setStatus(null);
+            setLastRun(null);
+          }}
           className="flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted transition-colors"
           title="Reset to defaults"
         >
@@ -202,6 +224,68 @@ export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
           {status}
         </div>
       )}
+
+      {lastRun?.improvement &&
+        typeof lastRun.baseline_reward === "number" &&
+        typeof lastRun.best_reward === "number" && (
+          <div className="rounded-lg border border-border bg-background px-3 py-2 space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Fairness vs baseline
+            </p>
+            <p className="text-[10px] text-muted-foreground leading-snug">
+              Baseline = round-robin initial labels (not real congressional districts).
+            </p>
+            <div className="text-[11px] font-mono text-foreground">
+              Reward {lastRun.baseline_reward.toFixed(3)} → {lastRun.best_reward.toFixed(3)}
+              <span
+                className={
+                  lastRun.improvement.total_reward_delta >= 0 ? " text-emerald-700" : " text-amber-800"
+                }
+              >
+                {" "}
+                (Δ {lastRun.improvement.total_reward_delta >= 0 ? "+" : ""}
+                {lastRun.improvement.total_reward_delta.toFixed(3)})
+              </span>
+              {lastRun.improvement.total_reward_pct_vs_baseline != null && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  [{lastRun.improvement.total_reward_pct_vs_baseline >= 0 ? "+" : ""}
+                  {lastRun.improvement.total_reward_pct_vs_baseline}% vs baseline]
+                </span>
+              )}
+            </div>
+            <div className="space-y-1 text-[10px] font-mono">
+              {(
+                [
+                  ["racial_fairness", "Racial fairness"],
+                  ["population_equality", "Pop. equality"],
+                  ["compactness", "Compactness"],
+                  ["voting_rights", "Voting rights"],
+                ] as const
+              ).map(([key, title]) => {
+                const b = lastRun.baseline_score_breakdown?.[key];
+                const o = lastRun.score_breakdown?.[key];
+                const c = lastRun.improvement?.components[key];
+                if (b === undefined || o === undefined || !c) return null;
+                const pct =
+                  c.pct_vs_baseline != null
+                    ? `${c.pct_vs_baseline >= 0 ? "+" : ""}${c.pct_vs_baseline}%`
+                    : "—";
+                return (
+                  <div key={key} className="leading-tight">
+                    <span className="text-muted-foreground">{title}: </span>
+                    {b.toFixed(2)} → {o.toFixed(2)}
+                    <span className={c.delta >= 0 ? " text-emerald-700" : " text-amber-800"}>
+                      {" "}
+                      (Δ {c.delta >= 0 ? "+" : ""}
+                      {c.delta.toFixed(3)}, {pct})
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
     </div>
   );
 }

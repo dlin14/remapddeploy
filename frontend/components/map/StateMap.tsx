@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import * as topojson from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
@@ -10,8 +10,43 @@ interface StateMapProps {
   stateName: string;
 }
 
+interface DistrictPlan {
+  assignment: Record<string, number>;
+  district_metrics: Array<{
+    district_id: number;
+    num_counties: number;
+    population: number;
+    minority_share: number;
+  }>;
+}
+
 export default function StateMap({ stateFips, stateName }: StateMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const [plan, setPlan] = useState<DistrictPlan | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPlan = async () => {
+      try {
+        const resp = await fetch(`http://localhost:8000/api/states/${stateFips}/district-plan`, {
+          cache: "no-store",
+        });
+        if (!resp.ok) return;
+        const data = (await resp.json()) as DistrictPlan;
+        if (!cancelled) setPlan(data);
+      } catch {
+        // Keep static map if API is unavailable.
+      }
+    };
+    loadPlan();
+    const timer = setInterval(loadPlan, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [stateFips]);
+
+  const districtColor = useMemo(() => d3.scaleOrdinal(d3.schemeTableau10), []);
 
   useEffect(() => {
     const svg = d3.select(svgRef.current);
@@ -63,10 +98,14 @@ export default function StateMap({ stateFips, stateName }: StateMapProps) {
         .join("path")
         .attr("class", "county")
         .attr("d", path as never)
-        .attr("fill", "none")
+        .attr("fill", (f) => {
+          const countyId = String(f.id).padStart(5, "0");
+          const districtId = plan?.assignment?.[countyId];
+          return districtId === undefined ? "#e5e7eb" : districtColor(String(districtId));
+        })
+        .attr("fill-opacity", 0.9)
         .attr("stroke", "#6366f1")
-        .attr("stroke-width", 0.6)
-        .attr("stroke-dasharray", "2,2");
+        .attr("stroke-width", 0.4);
 
       // County mesh (internal borders only)
       const countyMesh = topojson.mesh(
@@ -92,9 +131,29 @@ export default function StateMap({ stateFips, stateName }: StateMapProps) {
         .attr("text-anchor", "middle")
         .attr("font-size", 11)
         .attr("fill", "#6b7280")
-        .text("County boundaries shown — congressional district overlay coming soon");
+        .text("Counties colored by district assignment (latest optimizer run)");
+
+      if (plan?.district_metrics?.length) {
+        const legend = g.append("g").attr("transform", "translate(10,10)");
+        plan.district_metrics.slice(0, 10).forEach((d, i) => {
+          legend
+            .append("rect")
+            .attr("x", 0)
+            .attr("y", i * 16)
+            .attr("width", 10)
+            .attr("height", 10)
+            .attr("fill", districtColor(String(d.district_id)));
+          legend
+            .append("text")
+            .attr("x", 14)
+            .attr("y", i * 16 + 9)
+            .attr("font-size", 10)
+            .attr("fill", "#374151")
+            .text(`D${d.district_id + 1} · pop ${d.population.toLocaleString()}`);
+        });
+      }
     });
-  }, [stateFips]);
+  }, [districtColor, plan, stateFips]);
 
   return (
     <div className="w-full rounded-xl border border-border overflow-hidden bg-white">
