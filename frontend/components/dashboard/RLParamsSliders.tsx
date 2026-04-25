@@ -3,6 +3,16 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Play, RotateCcw, Cpu } from "lucide-react";
 
+// 118th Congress apportionment
+const ABBR_TO_DISTRICTS: Record<string, number> = {
+  AL: 7,  AK: 1,  AZ: 9,  AR: 4,  CA: 52, CO: 8,  CT: 5,  DE: 1,  DC: 1,
+  FL: 28, GA: 14, HI: 2,  ID: 2,  IL: 17, IN: 9,  IA: 4,  KS: 4,  KY: 6,
+  LA: 6,  ME: 2,  MD: 8,  MA: 9,  MI: 13, MN: 8,  MS: 4,  MO: 8,  MT: 2,
+  NE: 3,  NV: 4,  NH: 2,  NJ: 12, NM: 3,  NY: 26, NC: 14, ND: 1,  OH: 15,
+  OK: 5,  OR: 6,  PA: 17, RI: 2,  SC: 7,  SD: 1,  TN: 9,  TX: 38, UT: 4,
+  VT: 1,  VA: 11, WA: 10, WV: 2,  WI: 8,  WY: 1,
+};
+
 interface RLParams {
   learning_rate: number;
   gamma: number;
@@ -15,10 +25,9 @@ interface RLParams {
   vra_weight: number;
 }
 
-const DEFAULTS: RLParams = {
+const BASE_DEFAULTS: Omit<RLParams, "n_districts"> = {
   learning_rate: 3e-4,
   gamma: 0.99,
-  n_districts: 5,
   ent_coef: 0.01,
   n_steps: 2048,
   racial_weight: 0.35,
@@ -76,6 +85,8 @@ interface RunResponse {
 }
 
 export default function RLParamsSliders({ stateAbbr }: RLParamsSlidersProps) {
+  const defaultDistricts = ABBR_TO_DISTRICTS[stateAbbr] ?? 5;
+  const DEFAULTS: RLParams = { ...BASE_DEFAULTS, n_districts: defaultDistricts };
   const [params, setParams] = useState<RLParams>(DEFAULTS);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<string | null>(null);

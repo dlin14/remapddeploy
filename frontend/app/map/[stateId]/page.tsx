@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowLeft } from "lucide-react";
 import StateMap from "@/components/map/StateMap";
 import DemographicsPanel from "@/components/dashboard/DemographicsPanel";
@@ -72,18 +73,23 @@ export default async function StatePage({ params }: StatePageProps) {
   return (
     <div className="flex flex-col min-h-screen bg-slate-950 text-white">
       {/* Top bar */}
-      <header className="flex items-center gap-3 px-6 py-3 border-b border-white/10 bg-slate-950/90 backdrop-blur sticky top-0 z-20">
+      <header className="flex items-center gap-4 px-6 py-3 border-b border-white/10 bg-slate-950/90 backdrop-blur sticky top-0 z-20">
+        <Link href="/" className="flex items-center gap-2.5 shrink-0">
+          <Image src="/logo.png" alt="remapd" width={28} height={28} className="rounded-md" />
+          <span className="font-bold text-sm text-white/80">remapd</span>
+        </Link>
+        <span className="text-white/15">/</span>
         <Link
           href="/"
-          className="flex items-center gap-1.5 text-sm text-white/50 hover:text-white/90 transition-colors"
+          className="flex items-center gap-1.5 text-sm text-white/45 hover:text-white/80 transition-colors"
         >
-          <ArrowLeft size={14} />
+          <ArrowLeft size={13} />
           All States
         </Link>
-        <span className="text-white/20">/</span>
+        <span className="text-white/15">/</span>
         <span className="text-sm font-semibold text-white/90">{info.name}</span>
         <span className="ml-auto text-xs text-white/30 font-mono">
-          FIPS {info.fips} · {abbr}
+          {abbr} · {info.fips}
         </span>
       </header>
 

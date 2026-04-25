@@ -71,9 +71,10 @@ export default function NationwideStatsPanel() {
 
   if (!hasRun) {
     return (
-      <div className="w-full max-w-5xl mx-auto mt-4 rounded-xl border border-white/10 bg-slate-900/50 px-6 py-5 text-center">
-        <p className="text-xs text-white/30">
-          No optimizations run yet — click a state and hit <span className="text-indigo-400">Run Optimizer</span> to see results here.
+      <div className="w-full max-w-5xl mx-auto mt-6 rounded-2xl border border-white/10 bg-slate-900/50 px-8 py-7 text-center">
+        <p className="text-sm text-white/30">
+          No optimizations run yet — click a state and hit{" "}
+          <span className="text-indigo-400 font-medium">Run Optimizer</span> to see nationwide results here.
         </p>
       </div>
     );
@@ -82,26 +83,32 @@ export default function NationwideStatsPanel() {
   const { improvement, socialImpactScores, baselineSocialImpactScores, optimizedReward, baselineReward, state_abbr } = metrics!;
 
   return (
-    <div className="w-full max-w-5xl mx-auto mt-4 rounded-xl border border-white/10 bg-slate-900/50 px-6 py-5 space-y-4">
+    <div className="w-full max-w-5xl mx-auto mt-6 rounded-2xl border border-white/10 bg-slate-900/50 px-8 py-7 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Optimizer Results</p>
-          <p className="text-sm font-semibold text-white/85 mt-0.5">
+          <p className="text-[11px] uppercase tracking-widest text-white/30 font-semibold mb-1">
+            Optimizer Results
+          </p>
+          <p className="text-xl font-bold text-white/90">
             {stateCount > 0 ? `${stateCount} state${stateCount > 1 ? "s" : ""} optimized` : "Latest run"}
-            {state_abbr ? <span className="text-white/40 font-normal"> · most recent: <span className="text-indigo-400">{state_abbr}</span></span> : null}
+            {state_abbr && (
+              <span className="text-base text-white/40 font-normal ml-2">
+                · most recent: <span className="text-indigo-400 font-medium">{state_abbr}</span>
+              </span>
+            )}
           </p>
         </div>
         {typeof optimizedReward === "number" && typeof baselineReward === "number" && (
-          <div className="text-right">
-            <p className="text-[10px] text-white/30 uppercase tracking-wider">Weighted Reward</p>
-            <p className="text-sm font-mono text-white/80 mt-0.5">
+          <div className="text-right shrink-0">
+            <p className="text-[11px] text-white/30 uppercase tracking-wider mb-1">Weighted Reward</p>
+            <p className="text-xl font-mono font-bold text-white/90">
               {baselineReward.toFixed(3)}
-              <span className="text-white/30 mx-1">→</span>
+              <span className="text-white/25 mx-2 font-normal">→</span>
               {optimizedReward.toFixed(3)}
               {improvement && (
-                <span className={improvement.total_reward_delta >= 0 ? " text-emerald-400" : " text-amber-400"}>
-                  {" "}({improvement.total_reward_delta >= 0 ? "+" : ""}{improvement.total_reward_delta.toFixed(3)})
+                <span className={`text-base ml-2 ${improvement.total_reward_delta >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
+                  ({improvement.total_reward_delta >= 0 ? "+" : ""}{improvement.total_reward_delta.toFixed(3)})
                 </span>
               )}
             </p>
@@ -110,25 +117,26 @@ export default function NationwideStatsPanel() {
       </div>
 
       {/* Score breakdown grid */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-4 gap-4">
         {SCORE_KEYS.map(([key, label]) => {
           const baseline = baselineSocialImpactScores?.[key];
           const optimized = socialImpactScores?.[key];
           const comp = improvement?.components[key];
           if (optimized === undefined) return null;
           return (
-            <div key={key} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 space-y-1">
-              <p className="text-[10px] text-white/35 uppercase tracking-wider font-medium">{label}</p>
-              <p className="text-lg font-bold text-white/90 leading-none">
+            <div key={key} className="rounded-xl border border-white/10 bg-white/5 px-5 py-4 space-y-2">
+              <p className="text-[11px] text-white/35 uppercase tracking-wider font-semibold">{label}</p>
+              <p className="text-3xl font-bold text-white/95 leading-none">
                 {(optimized * 100).toFixed(1)}
-                <span className="text-xs text-white/30 font-normal">%</span>
+                <span className="text-sm text-white/30 font-normal ml-0.5">%</span>
               </p>
               {baseline !== undefined && comp ? (
-                <p className="text-[10px] font-mono">
+                <p className="text-xs font-mono">
+                  <span className="text-white/35">{(baseline * 100).toFixed(1)}% → </span>
                   <Delta val={comp.delta} />
                   {comp.pct_vs_baseline != null && (
-                    <span className="text-white/25 ml-1">
-                      ({comp.pct_vs_baseline >= 0 ? "+" : ""}{comp.pct_vs_baseline}% vs baseline)
+                    <span className="text-white/25 ml-1 text-[10px]">
+                      ({comp.pct_vs_baseline >= 0 ? "+" : ""}{comp.pct_vs_baseline}%)
                     </span>
                   )}
                 </p>
@@ -138,8 +146,8 @@ export default function NationwideStatsPanel() {
         })}
       </div>
 
-      <p className="text-[10px] text-white/20">
-        Baseline = round-robin initial district labels · improvements reflect optimizer gain over that starting point
+      <p className="text-[11px] text-white/20">
+        Baseline = round-robin initial district labels · delta reflects RL agent improvement over that starting point
       </p>
     </div>
   );

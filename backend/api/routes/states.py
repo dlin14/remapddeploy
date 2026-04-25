@@ -40,6 +40,21 @@ ABBR_TO_FIPS: dict[str, str] = {
 }
 FIPS_TO_ABBR: dict[str, str] = {fips: abbr for abbr, fips in ABBR_TO_FIPS.items()}
 
+# 118th Congress apportionment (2023–2025)
+FIPS_TO_DISTRICTS: dict[str, int] = {
+    "01": 7,  "02": 1,  "04": 9,  "05": 4,  "06": 52,
+    "08": 8,  "09": 5,  "10": 1,  "11": 1,  "12": 28,
+    "13": 14, "15": 2,  "16": 2,  "17": 17, "18": 9,
+    "19": 4,  "20": 4,  "21": 6,  "22": 6,  "23": 2,
+    "24": 8,  "25": 9,  "26": 13, "27": 8,  "28": 4,
+    "29": 8,  "30": 2,  "31": 3,  "32": 4,  "33": 2,
+    "34": 12, "35": 3,  "36": 26, "37": 14, "38": 1,
+    "39": 15, "40": 5,  "41": 6,  "42": 17, "44": 2,
+    "45": 7,  "46": 1,  "47": 9,  "48": 38, "49": 4,
+    "50": 1,  "51": 11, "53": 10, "54": 2,  "55": 8,
+    "56": 1,
+}
+
 
 class Demographics(BaseModel):
     state_name: str
@@ -177,8 +192,10 @@ async def get_district_plan(state_abbr: str):
 
     # No run yet — generate default round-robin plan so the map shows colors immediately
     try:
-        plan = RLAgent.default_plan(state_fips=fips, n_districts=5)
+        n_districts = FIPS_TO_DISTRICTS.get(fips, 5)
+        plan = RLAgent.default_plan(state_fips=fips, n_districts=n_districts)
         plan["state_abbr"] = normalized
+        plan["n_districts"] = n_districts
         return plan
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

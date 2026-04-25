@@ -139,7 +139,7 @@ export default function StateMap({ stateFips, stateName }: StateMapProps) {
         .attr("text-anchor", "middle")
         .attr("font-size", 10)
         .attr("fill", "rgba(255,255,255,0.25)")
-        .text("Counties colored by district assignment");
+        .text("Counties shaded by congressional district assignment");
 
       structureReadyRef.current = true;
       // Apply whatever plan was already loaded
@@ -166,15 +166,15 @@ export default function StateMap({ stateFips, stateName }: StateMapProps) {
         aria-label={`Map of ${stateName}`}
       />
       {plan?.district_metrics?.length ? (
-        <div className="px-4 py-3 border-t border-white/10 flex flex-wrap gap-2">
-          {plan.district_metrics.slice(0, 10).map((d) => (
+        <div className="px-4 py-3 border-t border-white/10 flex flex-wrap gap-x-4 gap-y-1.5">
+          {plan.district_metrics.map((d) => (
             <div key={d.district_id} className="flex items-center gap-1.5">
               <span
-                className="inline-block w-2.5 h-2.5 rounded-sm"
+                className="inline-block w-2.5 h-2.5 rounded-sm shrink-0"
                 style={{ backgroundColor: districtColor(String(d.district_id)) }}
               />
               <span className="text-[10px] text-white/50 font-mono">
-                D{d.district_id + 1} · {d.population.toLocaleString()}
+                District {d.district_id + 1} · {d.population.toLocaleString()}
               </span>
             </div>
           ))}
